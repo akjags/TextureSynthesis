@@ -27,20 +27,28 @@ def main(model_name, texture):
 
     textures_directory = "orig_ims"
 
-    print "Synthesizing texture", texture, "matching model", model_name
+    # Set number of iterations
+    iterations = 10001
+
+    print "Synthesizing texture", texture, "matching model", model_name, "for", iterations, "iterations"
     image_name = texture.split(".")[0]
     filename = textures_directory + "/" + texture
     img = np.load(filename)
 
     # Initialize texture synthesis
-    text_synth = ts.TextureSynthesis(sess, my_model, img, this_layer_weight, model_name, image_name)
+    text_synth = ts.TextureSynthesis(sess, my_model, img, this_layer_weight, model_name, image_name, iterations)
 
     # Do training
     text_synth.train()
     sys.stdout.flush()
 
 if __name__ == "__main__":
-    model_name = 'pool4'
-    texture = 'tulips.npy'
+    args = sys.argv
+    if len(args) < 3:
+        model_name = 'pool4'
+        texture = 'tulips.npy'
+    else:
+        model_name = args[1]
+        texture = args[2] + '.npy'
     main(model_name, texture)
 

@@ -1,16 +1,14 @@
 import numpy as np
 import tensorflow as tf
 import sys
-import matplotlib.pyplot as plt
 
 from ImageUtils import *
 from model import *
 
 SAVE_STEP = 1000
-ITERATIONS = 4001
 
 class TextureSynthesis:
-    def __init__(self, sess, model, actual_image, layer_constraints, model_name, image_name):
+    def __init__(self, sess, model, actual_image, layer_constraints, model_name, image_name, iterations):
         # 'layer_constraints' is dictionary with key = VGG layer and value = weight (w_l)
         # 'sess' is tensorflow session
         self.model_name = model_name # Of the form: conv#
@@ -30,6 +28,8 @@ class TextureSynthesis:
 
         self.init_image = self._gen_noise_image()
         self.constraints = self._get_constraints() # {layer_name: activations}
+
+        self.iterations = iterations
 
     def get_texture_loss(self):
         total_loss = 0.0
@@ -84,7 +84,7 @@ class TextureSynthesis:
 
         self.sess.run(tf.initialize_all_variables())
         self.sess.run(self.model_layers["input"].assign(self.init_image))
-        for i in range(ITERATIONS):
+        for i in range(self.iterations):
             self.sess.run(train_step)
             if i % 1 == 0:
                 print "Iteration: " + str(i) + "; Loss: " + str(self.sess.run(content_loss))
