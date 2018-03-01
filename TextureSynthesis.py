@@ -8,7 +8,7 @@ from model import *
 SAVE_STEP = 1000
 
 class TextureSynthesis:
-    def __init__(self, sess, model, actual_image, layer_constraints, model_name, image_name, iterations):
+    def __init__(self, sess, model, actual_image, layer_constraints, model_name, image_name, saveDir, iterations):
         # 'layer_constraints' is dictionary with key = VGG layer and value = weight (w_l)
         # 'sess' is tensorflow session
         self.model_name = model_name # Of the form: conv#
@@ -29,6 +29,10 @@ class TextureSynthesis:
         self.init_image = self._gen_noise_image()
         self.constraints = self._get_constraints() # {layer_name: activations}
 
+        # Directory to save outputs in
+        self.saveDir = saveDir
+
+        # Number of iterations to run for
         self.iterations = iterations
 
     def get_texture_loss(self):
@@ -91,27 +95,8 @@ class TextureSynthesis:
             if i % SAVE_STEP == 0:
                 print "Saving image..."
                 curr_img = self.sess.run(self.model_layers["input"])
-                filename = "output/%s_%s_step_%d" % (self.model_name, self.image_name, i)
+                filename = self.saveDir + "/%s_%s_step_%d" % (self.model_name, self.image_name, i)
                 save_image(filename, curr_img)
             sys.stdout.flush()
 
 #===============================
-
-if __name__ == "__main__":
-    vgg_weights = VGGWeights('vgg19_normalized.pkl')
-    my_model = Model(vgg_weights)
-    my_model.build_model()
-
-    img = np.load("texture_images/pine_shoots_norm.npy")
-
-    sess = tf.Session()
-    layer_weights = {"conv1_1": 1e9, "conv2_1": 1e9, "conv3_1": 1e9}
-    model_name = "conv3"
-    image_name = "pine_shoots"
-    text_synth = TextureSynthesis(sess, my_model, img, layer_weights, model_name, image_name)
-
-    print "Success in initializing."
-    print "Training..."
-
-    text_synth.train()
-
