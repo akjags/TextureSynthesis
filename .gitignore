@@ -1,0 +1,14 @@
+*.pyc
+output/
+output_conv5/
+.DS_Store
+.ipynb_checkpoints/
+nk_output/
+stimuli/v1/*.jpg
+stimuli/v2/*.jpg
+stimuli/v3/*.jpg
+stimuli/v4/*.jpg
+stimuli/v1/iters
+stimuli/v2/iters
+stimuli/v3/iters
+stimuli/v4/iters
