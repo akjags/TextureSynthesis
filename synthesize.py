@@ -7,7 +7,7 @@ import TextureSynthesis as ts
 from VGGWeights import *
 from model import *
 
-def main(model_name, texture):
+def main(model_name, texture, saveDir):
     # Load VGG-19 weights and build model
     vgg_weights = VGGWeights('vgg19_normalized.pkl')
     my_model = Model(vgg_weights)
@@ -17,11 +17,12 @@ def main(model_name, texture):
     sess = tf.Session()
 
     # Weights for each layer
+    pool5_weights = {"conv1_1": 1e9, "pool1": 1e9, "pool2": 1e9, "pool3": 1e9, "pool4": 1e9, "pool5": 1e9}
     pool4_weights = {"conv1_1": 1e9, "pool1": 1e9, "pool2": 1e9, "pool3": 1e9, "pool4": 1e9}
     pool3_weights = {"conv1_1": 1e9, "pool1": 1e9, "pool2": 1e9, "pool3": 1e9}
     pool2_weights = {"conv1_1": 1e9, "pool1": 1e9, "pool2": 1e9}
     pool1_weights = {'conv1_1': 1e9, 'pool1': 1e9}
-    layer_weights = {'pool1': pool1_weights, 'pool2': pool2_weights, 'pool3': pool3_weights, 'pool4': pool4_weights}
+    layer_weights = {'pool1': pool1_weights, 'pool2': pool2_weights, 'pool3': pool3_weights, 'pool4': pool4_weights, 'pool5': pool5_weights}
 
     this_layer_weight = layer_weights[model_name]
 
@@ -36,7 +37,7 @@ def main(model_name, texture):
     img = np.load(filename)
 
     # Initialize texture synthesis
-    text_synth = ts.TextureSynthesis(sess, my_model, img, this_layer_weight, model_name, image_name, iterations)
+    text_synth = ts.TextureSynthesis(sess, my_model, img, this_layer_weight, model_name, image_name, saveDir, iterations)
 
     # Do training
     text_synth.train()
@@ -50,5 +51,6 @@ if __name__ == "__main__":
     else:
         model_name = args[1]
         texture = args[2] + '.npy'
-    main(model_name, texture)
+        saveDir = args[3]
+    main(model_name, texture, saveDir)
 
