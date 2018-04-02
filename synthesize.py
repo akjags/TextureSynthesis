@@ -7,7 +7,7 @@ import TextureSynthesis as ts
 from VGGWeights import *
 from model import *
 
-def main(model_name, texture, saveDir):
+def main(model_name, texture, saveDir, nSpl):
     # Load VGG-19 weights and build model
     vgg_weights = VGGWeights('vgg19_normalized.pkl')
     my_model = Model(vgg_weights)
@@ -31,13 +31,13 @@ def main(model_name, texture, saveDir):
     # Set number of iterations
     iterations = 10001
 
-    print "Synthesizing texture", texture, "matching model", model_name, "for", iterations, "iterations"
+    print "Synthesizing texture", texture, "matching model", model_name, "for", iterations, "iterations, with nSplits:", nSpl
     image_name = texture.split(".")[0]
     filename = textures_directory + "/" + texture
     img = np.load(filename)
 
     # Initialize texture synthesis
-    text_synth = ts.TextureSynthesis(sess, my_model, img, this_layer_weight, model_name, image_name, saveDir, iterations)
+    text_synth = ts.TextureSynthesis(sess, my_model, img, this_layer_weight, model_name, image_name, saveDir, iterations, nSpl)
 
     # Do training
     text_synth.train()
@@ -45,12 +45,15 @@ def main(model_name, texture, saveDir):
 
 if __name__ == "__main__":
     args = sys.argv
-    if len(args) < 3:
+    if len(args) < 4:
         model_name = 'pool4'
         texture = 'tulips.npy'
+        saveDir = 'v1'
+        nSpl = 2
     else:
         model_name = args[1]
         texture = args[2] + '.npy'
         saveDir = args[3]
-    main(model_name, texture, saveDir)
+        nSpl = int(args[4])
+    main(model_name, texture, saveDir, nSpl)
 

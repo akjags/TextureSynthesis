@@ -1,21 +1,30 @@
 #!/bin/bash 
 #
-#SBATCH --job-name=txsh
-#SBATCH --output=/home/akshayj/log/txsh.%j.out
-#SBATCH --error=/home/akshayj/log/txsh.%j.err
-#SBATCH --time=00:35:00
+#SBATCH --job-name=p4ns2
+#SBATCH --time=00:30:00
+#SBATCH -p gpu,hns
 #SBATCH --gres gpu:1
-#SBATCH -p gpu,hns_gpu
 #SBATCH --nodes=1
 #SBATCH --mem=2000
 #SBATCH --mail-type=END,FAIL # notifications for job done & fail
 #SBATCH --mail-user=akshayj@stanford.edu
 
-module load tensorflow/0.9.0
-module load python/2.7.5
+if [[ "$SHERLOCK" == "1" ]]; then
+  module load tensorflow/0.9.0
+  module load python/2.7.5
+  echo "Running on Sherlock 1.0"
 
-cd /home/akshayj/TextureSynthesis
+elif [[ "$SHERLOCK" == "2" ]]; then
+  module load py-tensorflow/1.3.0_py27
+  module load py-scipystack/1.0_py27
+  module load python/2.7.13
+  echo "Running on Sherlock 2.0"
+fi
 
-vname='v1'
-mkdir vname
-srun python ./synthesize.py 'pool5' 'fronds' $vname
+cd $HOME/TextureSynthesis
+vname='texture_output'
+nSpl='2'
+layer='pool4'
+im='forest'
+mkdir $vname
+srun python ./synthesize.py $layer $im $vname $nSpl
