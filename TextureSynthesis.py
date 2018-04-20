@@ -62,7 +62,7 @@ class TextureSynthesis:
             assert layer_activations_shape[0] == 1, "Only supports 1 image at a time."
             num_filters = layer_activations_shape[3] # N
             num_spatial_locations = layer_activations_shape[1] * layer_activations_shape[2] # M
-            layer_gram_matrix = self._compute_weighted_gram_matrix(layer, layer_activations, num_filters, num_spatial_locations, self.nSpl)
+            layer_gram_matrix = self._compute_weighted_gram_matrix(layer, layer_activations, num_filters, num_spatial_locations)
             desired_gram_matrix = self.constraints[layer]
 
             total_loss += self.layer_weights[layer] * (1.0 / (4 * (num_filters**2) * (num_spatial_locations**2))) \
@@ -78,7 +78,7 @@ class TextureSynthesis:
             num_filters = layer_activations.shape[3] # N
             num_spatial_locations = layer_activations.shape[1] * layer_activations.shape[2] # M
             print layer_activations.shape
-            constraints[layer] = self._compute_weighted_gram_matrix_np(layer, layer_activations, num_filters, num_spatial_locations, self.nSpl)
+            constraints[layer] = self._compute_weighted_gram_matrix_np(layer, layer_activations, num_filters, num_spatial_locations)
 
         return constraints
 
@@ -94,7 +94,12 @@ class TextureSynthesis:
         return tf.matmul(tf.transpose(F), F)  
 
     def get_subset_boundaries(self):
-        sub_sz = self.imsize / self.nSpl
+        '''
+        Using self.nSpl (number of splits), computes the subset boundaries
+        - returns a list of lists each containing the boundaries of the i'th subset 
+        - subset is aka gramRF aka pooling region
+        '''
+        sub_sz = int(self.imsize / self.nSpl)
         subset_boundaries = []
 
         for hi in range(0, self.imsize, sub_sz):
@@ -107,91 +112,10 @@ class TextureSynthesis:
 
         return subset_boundaries
 
-    def _compute_gram_matrix_subset_np(self, layer, F, N, M, n_spl):
-        h = F.shape[1]
-        w = F.shape[2]
-
-        F = np.squeeze(F);
-        F2 = np.zeros((N,N,1))
-
-        sub_sz = h/n_spl;
-
-        for hi in range(0, h, sub_sz):
-            end_h = np.minimum(hi + sub_sz, h)
-
-            for wi in range(0, w, sub_sz):
-                end_w = np.minimum(wi + sub_sz, w)
-
-                sub_bound = [[hi, end_h], [wi, end_w]] # subset bounds
-
-                subset = F[hi:end_h, wi:end_w, :] # s x s x n_filt
-                subset = subset.reshape((len(range(hi, end_h)) * len(range(wi, end_w)), N)) # s^2 x n_filt
-
-                # Take the dot product within that subregion.
-                dp = np.dot(subset.T, subset).reshape((N,N,1)) # size: n_filt x n_filt
-                F2 = np.concatenate((F2, dp), axis=2)
-
-        return F2[:,:,1:];
-
-    def _compute_gram_matrix_subset(self, layer, F, N, M, n_spl):
-        # F: (1, height, width, num_filters) -- layer activations
-        # N: num_filters
-        # M: number of spatial locations in filter (height * width)
-        # n_subsets: number of subsets of each filter.
-
-        # Multiply a (nFilters, filtSz) x (filtSz, nFilters) to get a (nFilt x nFilt) gram matrix 
-        # where each element (i,j) represents the dot product of filter_i with filter_j
-
-        # I want to change this so you're only computing the dot product within a subset of the image.
-        f_shape = shape(F)
-        h = f_shape[1]
-        w = f_shape[2]
-
-        F = tf.squeeze(F);
-
-        F2 = tf.to_float(tf.constant(np.zeros(N*N), shape=(N, N, 1)));
-
-        sub_sz = h/n_spl;
-
-        ### MAKE CHANGES HERE: AKSHAY
-        for hi in range(0, h, sub_sz):
-            end_h = np.minimum(hi + sub_sz, h)
-
-            for wi in range(0, w, sub_sz):
-                end_w = np.minimum(wi + sub_sz, w)
-
-                sub_bound = [[hi, end_h], [wi, end_w]] # subset bounds
-
-                subset = F[hi:end_h, wi:end_w, :] # s x s x n_filt
-                subset = tf.reshape(subset, (len(range(hi, end_h)) * len(range(wi, end_w)), N)) # s^2 x n_filt
-
-                # Take the dot product within that subregion.
-                dp = tf.matmul(tf.transpose(subset), subset)
-                dp = tf.reshape(dp, (N,N,1)) # size: n_filt x n_filt
-                F2 = tf.concat(values=[F2, dp], axis=2)
-            
-        return F2[:,:,1:];
-
-    def _compute_weighted_gram_matrix(self, layer, F, N, M, n_spl):
+    def _compute_weighted_gram_matrix_np(self, layer, F, N, M):
         '''
-          Computes gram matrix by weighting it according to how much the RF belongs to each subset.
+        Computes gram matrix weighted by the proportion that each unit's RF overlaps with each subset.
         '''
-        F2 = tf.to_float(tf.constant(np.zeros(N*N), shape=(N, N, 1)));
-        weight_mtx = self.layer_subset_weights[layer]
-        F = tf.reshape(F, (M, N))  # Reshapes inputs into (height*width, n_filters)
-
-        for si in range(len(self.subset_boundaries)):
-
-            subset_weights = tf.to_float(tf.reshape(weight_mtx[:,:,si], (M,1))) # (out_size * out_size, 1)
-            weighted_F = tf.multiply(F, subset_weights)
-
-            dp = tf.matmul(tf.transpose(weighted_F), weighted_F)
-            dp = tf.reshape(dp, (N,N,1))
-            F2 = tf.concat(values=[F2, dp], axis=2)
-
-        return F2[:,:,1:]
-
-    def _compute_weighted_gram_matrix_np(self, layer, F, N, M, n_spl):
         F2 = np.zeros((N,N,1))
         F = np.reshape(F, (M,N))
         weight_mtx = self.layer_subset_weights[layer]
@@ -230,7 +154,7 @@ class TextureSynthesis:
                     for yi in range(out_size):
                         pos = [xi,yi]
                         rf_size, center, [tl,br] = self.get_rf_coords(lname, pos)
-                        layer_weight[xi,yi,si] = calc_proportion_overlap([tl,br], isub)
+                        layer_weight[xi,yi,si] = calc_proportion_overlap([tl,br], isub, self.imsize)
             lsub_weights[lname] = layer_weight
         return lsub_weights
 
@@ -317,19 +241,67 @@ class TextureSynthesis:
 
         return rf_size, center, [top_left, bottom_right]
 
-def calc_proportion_overlap(rf, subset): 
-    # Calculate what percentage of the receptive field is contained within the subset
+def calc_proportion_overlap(rf, subset, imsize): 
+    '''
+    Calculates what percentage of the receptive field is contained within the subset
+       - takes as arguments a neuron's RF, a gram RF (aka subset), and the image size.
+    '''
     tl_subset, br_subset = subset[0], subset[1] # rect1
     tl_rf, br_rf = rf[0], rf[1] # rect2
     
+    # Total receptive field area
     rf_area = (br_rf[0] - tl_rf[0])*(br_rf[1] - tl_rf[1])
     
-    x_overlap = np.maximum(0, np.minimum(br_subset[0], br_rf[0]) - np.maximum(tl_subset[0], tl_rf[0]));
-    y_overlap = np.maximum(0, np.minimum(br_subset[1], br_rf[1]) - np.maximum(tl_subset[1], tl_rf[1]));
-    overlapArea = 1.0*x_overlap * y_overlap / rf_area;
+    ## OLD METHOD
+    #x_overlap = np.maximum(0, np.minimum(br_subset[0], br_rf[0]) - np.maximum(tl_subset[0], tl_rf[0]));
+    #y_overlap = np.maximum(0, np.minimum(br_subset[1], br_rf[1]) - np.maximum(tl_subset[1], tl_rf[1]));
+    #overlapArea = 1.0*x_overlap * y_overlap / rf_area;
+
+    # New method: trapezoidal receptive fields
+    rf_mtx = np.zeros((imsize, imsize))
+    sub_mtx = np.zeros((imsize, imsize))
+    rf_mtx[int(np.maximum(0,tl_rf[0])):int(np.minimum(imsize,br_rf[0])), int(np.maximum(0,tl_rf[1])):int(np.minimum(imsize,br_rf[1]))] = 1
+    xlim = [int(tl_subset[0]), int(br_subset[0])]
+    ylim = [int(tl_subset[1]), int(br_subset[1])]
+    sub_mtx = calc_subset_shape(imsize, xlim, ylim)
+
+    ## OLD METHOD 2: Square receptive fields
+    #sub_mtx[xlim[0]:xlim[1], ylim[0]:ylim[1]] = 1
+
+    overlap2 = np.sum(np.multiply(rf_mtx, sub_mtx))*1.0 / rf_area
+
+    return overlap2
+
+def calc_subset_shape(imsize, xlim, ylim):
+    # Make subsets shaped as trapezoids (flat top, angular borders)
+    # mrgn sets the size of the borders
+    mrgn = 10
+    rpmt = np.matlib.repmat
+    imin = lambda x,y: int(np.minimum(x,y))
+
+    sub_mtx = np.zeros((imsize,imsize))
     
-    # calculate percentage of receptive field that overlaps
-    return overlapArea
+    # Top of trapezoid
+    sub_mtx[xlim[0]: xlim[1], ylim[0]: ylim[1]] = 1
+
+    # left side
+    if xlim[0] != 0:
+        brdr = np.linspace(0,1, imin(xlim[0]+mrgn, imsize) - (xlim[0]-mrgn))
+        sub_mtx[xlim[0]-mrgn:xlim[0]+mrgn, ylim[0]:ylim[1]] = rpmt(brdr, ylim[1]-ylim[0], 1).T
+    # top side
+    if ylim[0] != 0:
+        brdr = np.linspace(0,1, imin(ylim[0]+mrgn, imsize) - (ylim[0]-mrgn))
+        sub_mtx[xlim[0]:xlim[1], ylim[0]-mrgn:ylim[0]+mrgn] = rpmt(brdr, xlim[1]-xlim[0], 1)
+    # right side
+    if xlim[1] != imsize:
+        brdr2 = np.linspace(1,0, imin(xlim[1]+mrgn, imsize) - (xlim[1]-mrgn))
+        sub_mtx[xlim[1]-mrgn:xlim[1]+mrgn, ylim[0]:ylim[1]] = rpmt(brdr2, ylim[1]-ylim[0],1).T
+    # bottom side
+    if ylim[1] != imsize:
+        brdr2 = np.linspace(1,0, imin(ylim[1]+mrgn, imsize) - (ylim[1]-mrgn))
+        sub_mtx[xlim[0]:xlim[1], ylim[1]-mrgn:ylim[1]+mrgn] = rpmt(brdr2, xlim[1]-xlim[0],1)
+
+    return sub_mtx
 
 def shape(tensor):
     s = tensor.get_shape()
@@ -350,6 +322,6 @@ if __name__ == "__main__":
     model_name = 'pool4'
     saveDir = 'v4'
     iterations = 10000
-    nSplits = 2
+    nSplits = 3
     ts = TextureSynthesis(sess, my_model, img, pool1_weights, model_name, image_name, saveDir, iterations, nSplits)
 
