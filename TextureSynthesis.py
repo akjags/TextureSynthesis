@@ -111,6 +111,24 @@ class TextureSynthesis:
                 subset_boundaries.append(sub_bound)
 
         return subset_boundaries
+    
+    def _compute_weighted_gram_matrix(self, layer, F, N, M):
+        '''
+        Computes gram matrix
+        '''
+        F2 = tf.to_float(tf.constant(np.zeros(N*N), shape=(N, N, 1)));
+        F = tf.reshape(F, (M, N))
+        weight_mtx = self.layer_subset_weights[layer]
+
+        for si in range(len(self.subset_boundaries)):
+            subset_weights = tf.to_float(tf.reshape(weight_mtx[:,:,si], (M,1)))
+            weighted_F = tf.multiply(F, subset_weights)
+
+            dp = tf.matmul(tf.transpose(weighted_F), weighted_F)
+            dp = tf.reshape(dp, (N,N,1))
+            F2 = tf.concat(values=[F2, dp], axis=2)
+
+        return F2[:,:,1:]
 
     def _compute_weighted_gram_matrix_np(self, layer, F, N, M):
         '''
@@ -320,8 +338,9 @@ if __name__ == "__main__":
     filename = textures_directory + "/" + texture
     img = np.load(filename)
     model_name = 'pool2'
-    saveDir = 'v4'
-    iterations = 10000
+    saveDir = 'w3'
+    iterations = 10001
     nSplits = 2.5
     ts = TextureSynthesis(sess, my_model, img, pool1_weights, model_name, image_name, saveDir, iterations, nSplits)
+    ts.train()
 
