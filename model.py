@@ -38,6 +38,7 @@ class Model:
         self.utils = Utils()
         self.model = dict()
         self.model_created = False
+        self.layer_weights = {}
 
     def build_model(self):
         # Shape: [out_channels, in_channels, filter_height, filter_width]
@@ -49,45 +50,72 @@ class Model:
 
         ind = 0
         self.model["conv1_1"] = self._conv2d_relu(self.model["input"], self._transpose_weights(all_weights[ind]), all_weights[ind+1])
+        self.layer_weights['conv1_1'] = self._transpose_weights(all_weights[ind])
+
         ind += 2
         self.model["conv1_2"] = self._conv2d_relu(self.model["conv1_1"], self._transpose_weights(all_weights[ind]), all_weights[ind+1])
         self.model["pool1"] = self._avg_pool(self.model["conv1_2"])
+        self.layer_weights['conv1_2'] = self._transpose_weights(all_weights[ind])
 
         ind += 2
         self.model["conv2_1"] = self._conv2d_relu(self.model["pool1"], self._transpose_weights(all_weights[ind]), all_weights[ind+1])
+        self.layer_weights['conv2_1'] = self._transpose_weights(all_weights[ind])
+
         ind += 2
         self.model["conv2_2"] = self._conv2d_relu(self.model["conv2_1"], self._transpose_weights(all_weights[ind]), all_weights[ind+1])
         self.model["pool2"] = self._avg_pool(self.model["conv2_2"])
+        self.layer_weights['conv2_2'] = self._transpose_weights(all_weights[ind])
 
         ind += 2
         self.model["conv3_1"] = self._conv2d_relu(self.model["pool2"], self._transpose_weights(all_weights[ind]), all_weights[ind+1])
+        self.layer_weights['conv3_1'] = self._transpose_weights(all_weights[ind])
+
         ind += 2
         self.model["conv3_2"] = self._conv2d_relu(self.model["conv3_1"], self._transpose_weights(all_weights[ind]), all_weights[ind+1])
+        self.layer_weights['conv3_2'] = self._transpose_weights(all_weights[ind])
+
         ind += 2
         self.model["conv3_3"] = self._conv2d_relu(self.model["conv3_2"], self._transpose_weights(all_weights[ind]), all_weights[ind+1])
+        self.layer_weights['conv3_3'] = self._transpose_weights(all_weights[ind])
+
         ind += 2
         self.model["conv3_4"] = self._conv2d_relu(self.model["conv3_3"], self._transpose_weights(all_weights[ind]), all_weights[ind+1])
         self.model["pool3"] = self._avg_pool(self.model["conv3_4"])
+        self.layer_weights['conv3_4'] = self._transpose_weights(all_weights[ind])
 
         ind += 2
         self.model["conv4_1"] = self._conv2d_relu(self.model["pool3"], self._transpose_weights(all_weights[ind]), all_weights[ind+1])
+        self.layer_weights['conv4_1'] = self._transpose_weights(all_weights[ind])
+
         ind += 2
         self.model["conv4_2"] = self._conv2d_relu(self.model["conv4_1"], self._transpose_weights(all_weights[ind]), all_weights[ind+1])
+        self.layer_weights['conv4_2'] = self._transpose_weights(all_weights[ind])
+
         ind += 2
         self.model["conv4_3"] = self._conv2d_relu(self.model["conv4_2"], self._transpose_weights(all_weights[ind]), all_weights[ind+1])
+        self.layer_weights['conv4_3'] = self._transpose_weights(all_weights[ind])
+
         ind += 2
         self.model["conv4_4"] = self._conv2d_relu(self.model["conv4_3"], self._transpose_weights(all_weights[ind]), all_weights[ind+1])
         self.model["pool4"] = self._avg_pool(self.model["conv4_4"])
+        self.layer_weights['conv4_4'] = self._transpose_weights(all_weights[ind])
 
         ind += 2
         self.model["conv5_1"] = self._conv2d_relu(self.model["pool4"], self._transpose_weights(all_weights[ind]), all_weights[ind+1])
+        self.layer_weights['conv5_1'] = self._transpose_weights(all_weights[ind])
+
         ind += 2
         self.model["conv5_2"] = self._conv2d_relu(self.model["conv5_1"], self._transpose_weights(all_weights[ind]), all_weights[ind+1])
+        self.layer_weights['conv5_2'] = self._transpose_weights(all_weights[ind])
+
         ind += 2
         self.model["conv5_3"] = self._conv2d_relu(self.model["conv5_2"], self._transpose_weights(all_weights[ind]), all_weights[ind+1])
+        self.layer_weights['conv5_3'] = self._transpose_weights(all_weights[ind])
+
         ind += 2
         self.model["conv5_4"] = self._conv2d_relu(self.model["conv5_3"], self._transpose_weights(all_weights[ind]), all_weights[ind+1])
         self.model["pool5"] = self._avg_pool(self.model["conv5_4"])
+        self.layer_weights['conv5_4'] = self._transpose_weights(all_weights[ind])
 
         self.model_created = True
 
