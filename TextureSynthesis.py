@@ -179,7 +179,7 @@ class TextureSynthesis:
             if i % SAVE_STEP == 0:
                 print "Saving image..."
                 curr_img = self.sess.run(self.model_layers["input"])
-                filename = self.saveDir + "/%dx%d_%s_%s_step_%d" % (self.nSpl, self.nSpl, self.model_name, self.image_name, i)
+                filename = self.saveDir + "/%gx%g_%s_%s_step_%d" % (self.nSpl, self.nSpl, self.model_name, self.image_name, i)
                 save_image(filename, curr_img)
             sys.stdout.flush()
     
@@ -319,9 +319,9 @@ if __name__ == "__main__":
     textures_directory = "orig_ims"
     filename = textures_directory + "/" + texture
     img = np.load(filename)
-    model_name = 'pool4'
+    model_name = 'pool2'
     saveDir = 'v4'
     iterations = 10000
-    nSplits = 3
+    nSplits = 2.5
     ts = TextureSynthesis(sess, my_model, img, pool1_weights, model_name, image_name, saveDir, iterations, nSplits)
 

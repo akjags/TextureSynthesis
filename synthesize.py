@@ -54,6 +54,6 @@ if __name__ == "__main__":
         model_name = args[1]
         texture = args[2] + '.npy'
         saveDir = args[3]
-        nSpl = int(args[4])
+        nSpl = float(args[4])
     main(model_name, texture, saveDir, nSpl)
 
