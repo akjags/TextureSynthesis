@@ -58,25 +58,21 @@ nTrials = int(bd['nTrials'])
 
 # Observer model
 obs_RFs = bd['rfNames']
-obs_rf = obs_RFs[3] # Set observer receptive field size to 4x4
 obs_layers = bd['layerNames']
-obs_lay = obs_layers[2] # Set observer layer to Pool 4
-distIdx = 1 # Get only first distracto
 # Split out by eccentricity
 all_eccs = np.unique(bd['ecc'])
 
 r2s = np.zeros((len(all_eccs), len(obs_RFs), len(obs_layers)))
 
-#td = np.zeros((len(obs_layers), len(obs_RFs), nTrials))
 correct = bd['corr_trials'][:nTrials]
-corr1idx = np.where(correct==1)
-corr0idx = np.where(correct==0)
+# Loop through each eccentricity, fit separate model for data from each ecc.
 for eccI in range(len(all_eccs)):
   this_ecc = all_eccs[eccI]
   whichEccs = (bd['ecc'] == this_ecc)[:nTrials]
   corr_ecc = correct[whichEccs] # Take the subset of trainlabels with this ecc.
     
   cntr = 1
+  printStrs = []
   print '~~~ Eccentricity: %d degrees' % (this_ecc)
   for rfI in range(len(obs_RFs)):
     obs_rf = obs_RFs[rfI]
@@ -102,8 +98,13 @@ for eccI in range(len(all_eccs)):
 
       ll = log_loss(y_test, probs)
 
-      print 'Model %i: Observer Layer = %s, RFSize = %s: Accuracy: %g %%; R2 = %g; Coef = %g; Log_Loss = %g' % (cntr, obs_lay, obs_rf, accuracy, r2, logReg.coef_, ll)
+      printStr = 'Model %2i: Observer Layer = %s, RFSize = %s : \t Accuracy = %.2f%%; R2 = %.3f; LogLoss = %.3f' % (cntr, obs_lay, obs_rf, accuracy, r2, ll)
+      print printStr
+      printStrs.append(printStr)
+ 
       cntr = cntr + 1
 
       #if not (np.sum(preds) == len(preds) or np.sum(preds) == 0):
       #  print('Hooray! Model isnt guessing all 1s or all 0s')
+  r2 = np.ravel(r2s[eccI,:,:])
+  print 'BEST Model: %s' % (printStrs[np.argmax(r2)])
