@@ -327,20 +327,23 @@ def shape(tensor):
 
 #===============================
 if __name__ == "__main__":
+    args = sys.argv
+    texture = "%s.npy" %(args[1]) # pass texture in as an argument
     sess = tf.Session()
     pool1_weights = {'conv1_1': 1e9, 'pool1': 1e9, 'pool2': 1e9, 'pool3': 1e9, 'pool4': 1e9}
     vgg_weights = VGGWeights('vgg19_normalized.pkl')
     my_model = Model(vgg_weights)
     my_model.build_model()
-    texture = "tulips.npy"
+    #texture = "tulips.npy"
     image_name = texture.split(".")[0]
     textures_directory = "orig_ims"
     filename = textures_directory + "/" + texture
     img = np.load(filename)
-    model_name = 'pool2'
+    model_name = 'pool4'
     saveDir = 'w3'
     iterations = 10001
-    nSplits = 2.5
+    nSplits = 4
     ts = TextureSynthesis(sess, my_model, img, pool1_weights, model_name, image_name, saveDir, iterations, nSplits)
-    ts.train()
+    np.save('/home/users/akshayj/TextureSynthesis/tmp/gram_%s.npy' %(image_name), ts.constraints)
+    #ts.train()
 

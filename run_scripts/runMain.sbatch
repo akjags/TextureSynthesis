@@ -1,11 +1,11 @@
 #!/bin/bash 
 #
-#SBATCH --job-name=p4ns2
-#SBATCH --time=00:30:00
-#SBATCH -p gpu,hns
+#SBATCH --job-name=4p4bub
+#SBATCH --time=00:60:00
+#SBATCH -p hns,gpu
 #SBATCH --gres gpu:1
 #SBATCH --nodes=1
-#SBATCH --mem=2000
+#SBATCH --mem=5000
 #SBATCH --mail-type=END,FAIL # notifications for job done & fail
 #SBATCH --mail-user=akshayj@stanford.edu
 
@@ -15,16 +15,15 @@ if [[ "$SHERLOCK" == "1" ]]; then
   echo "Running on Sherlock 1.0"
 
 elif [[ "$SHERLOCK" == "2" ]]; then
-  module load py-tensorflow/1.3.0_py27
-  module load py-scipystack/1.0_py27
-  module load python/2.7.13
+  module load py-tensorflow
+  module load py-scipystack
   echo "Running on Sherlock 2.0"
 fi
 
 cd $HOME/TextureSynthesis
-vname='texture_output'
-nSpl='2'
+savedir='s3'
 layer='pool4'
-im='forest'
-mkdir $vname
-srun python ./synthesize.py $layer $im $vname $nSpl
+im='bubbles'
+nSpl='4'
+mkdir $savedir
+srun python ./synthesize.py $layer $im $savedir $nSpl
