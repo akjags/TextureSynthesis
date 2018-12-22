@@ -15,7 +15,8 @@ import copy
 from pt_tex_synth import *
 
 # desired size of the output image
-imsize = 512 if torch.cuda.is_available() else 128  # use small size if no gpu
+imsize = 256 if torch.cuda.is_available() else 128  # use small size if no gpu
+print(device)
 
 loader = transforms.Compose([
     transforms.Resize(imsize),  # scale imported image
@@ -60,7 +61,7 @@ orig_input = input_img.cpu().clone(); # save it to a different filename
 ########## MAIN: SPECIFY OPTIONS:
 
 # Specify num_steps
-num_steps = 300
+num_steps = 1000
 
 # Specify the style image to match
 style_img = image_loader("/Users/akshay/proj/TextureSynthesis/stimuli/textures/orig_color/cherries.jpg")
@@ -72,5 +73,5 @@ style_layers = ['pool1', 'pool2', 'pool4'];
 output_leaves = run_texture_synthesis(cnn, cnn_normalization_mean, cnn_normalization_std,
                             style_img, input_img, num_steps=num_steps, style_layers=style_layers_default)
 
-imsave(output_leave, 'out_cherries.png');
+imsave(output_leaves, 'out_cherries2.png');
 
