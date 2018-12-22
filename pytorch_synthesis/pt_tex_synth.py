@@ -55,7 +55,7 @@ class Normalization(nn.Module):
     
 
 def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
-                               style_img, style_layers=style_layers_default, device=device):
+                               style_img, style_layers, device=device):
     cnn = copy.deepcopy(cnn)
 
     # normalization module
@@ -69,18 +69,17 @@ def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
     # to put in modules that are supposed to be activated sequentially
     model = nn.Sequential(normalization)
 
-    i = 0  # increment every time we see a conv
+    i = 0  # increment every time we see a pool layer
+    j = 0  # increment for each conv layer within a block
     for layer in cnn.children():
         if isinstance(layer, nn.Conv2d):
-            i += 1
-            name = 'conv_{}'.format(i)
+            j += 1
+            name = 'conv_{}_{}'.format(i, j)
         elif isinstance(layer, nn.ReLU):
-            name = 'relu_{}'.format(i)
-            # The in-place version doesn't play very nicely with the ContentLoss
-            # and StyleLoss we insert below. So we replace with out-of-place
-            # ones here.
+            name = 'relu_{}_{}'.format(i, j)
             layer = nn.ReLU(inplace=False)
         elif isinstance(layer, nn.MaxPool2d):
+            i += 1; j = 0;
             name = 'pool_{}'.format(i)
         elif isinstance(layer, nn.BatchNorm2d):
             name = 'bn_{}'.format(i)
@@ -112,10 +111,10 @@ def get_input_optimizer(input_img):
 
 def run_texture_synthesis(cnn, normalization_mean, normalization_std,
                        style_img, input_img, num_steps=300,
-                       style_weight=1000000):
+                       style_weight=1000000, style_layers=style_layers_default):
     """Run the style transfer."""
     print('Building the style transfer model..')
-    model, style_losses = get_style_model_and_losses(cnn, normalization_mean, normalization_std, style_img)
+    model, style_losses = get_style_model_and_losses(cnn, normalization_mean, normalization_std, style_img, style_layers=style_layers)
     optimizer = get_input_optimizer(input_img)
 
     print('Optimizing..')
