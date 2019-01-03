@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
 import torchvision.models as models
 
-import copy
+import copy, os, time
 from pt_tex_synth import *
 import argparse
 import pdb
@@ -25,6 +25,7 @@ loader = transforms.Compose([
 
 unloader = transforms.ToPILImage()  # reconvert into PIL image
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def image_loader(image_name):
     image = Image.open(image_name)
@@ -51,10 +52,10 @@ if __name__ == "__main__":
   ### Parse arguments
   parser = argparse.ArgumentParser()
   parser.add_argument("-i", "--img_path", default="/home/users/akshayj/TextureSynthesis/stimuli/textures/orig_color/cherries.jpg", help="specifies the path of the original image")
-  parser.add_argument("-o", "--out_dir", default="/home/users/akshayj/TextureSynthesis/stimuli/textures/out_color/v1", help="specifies the path of the output directory")
-  parser.add_argument("-l", "--layer", default="pool2", help="specifies the layer to match statistics through")
-  parser.add_argument("-s", "--nSplits", default=2, help="specifies the number of sections to split each dimension into (e.g. 1x1, 2x2, nxn)")
-  parser.add_argument('-n', '--nSteps', default=5000, help="specifies the number of steps to run the gradient descent for")
+  parser.add_argument("-o", "--out_dir", default="/home/users/akshayj/TextureSynthesis/stimuli/textures/out_color/v2", help="specifies the path of the output directory")
+  parser.add_argument("-l", "--layer", default="pool4", help="specifies the layer to match statistics through")
+  parser.add_argument("-s", "--nSplits", default=1, help="specifies the number of sections to split each dimension into (e.g. 1x1, 2x2, nxn)")
+  parser.add_argument('-n', '--nSteps', type=int, default=10000, help="specifies the number of steps to run the gradient descent for")
   args = parser.parse_args()
 
   ### PyTorch Models (VGG)
@@ -71,20 +72,31 @@ if __name__ == "__main__":
   img_name = args.img_path.split('/')[-1].split('.')[0] # get just the name (e.g. cherries) without path or extension
 
   # Specify which layers to match
-  all_layers = ['conv_1_1', 'pool_1', 'pool_2', 'pool_4'];
-  style_layers = {'conv1_1': all_layers[:1], 'pool1': all_layers[:2], 'pool2': all_layers[:3], 'pool4':all_layers}
-  this_layers = style_layers[args.layer]
+  all_layers = ['conv1_1', 'pool1', 'pool2', 'pool3', 'pool4'];
+  this_layers = all_layers[:all_layers.index(args.layer)+1]
+  #this_layers = ['conv1_1', 'pool1', 'pool2', 'pool3', 'pool4'];
+  print(this_layers)
 
   ## Run Texture Synthesis
   # Randomly initialize white noise input image
   input_img = torch.randn(style_img.data.size(), device=device)
 
-  # Check if we're on GPU or CPU, then run! 
-  print("Using GPU" if torch.cuda.is_available() else "Using CPU")
-  output_leaves = run_texture_synthesis(cnn, cnn_normalization_mean, cnn_normalization_std,
-                              style_img, input_img, num_steps=args.nSteps, style_layers=style_layers)
+  # Make directory if it doesn't already exist
+  if not os.path.isdir(args.out_dir):
+    os.makedirs(args.out_dir) 
+  saveName = '{}x{}_{}_{}.png'.format(args.nSplits, args.nSplits, args.layer, img_name) # e.g. 1x1_pool2_cherries.png
 
+  # Get layer features
+  get_layer_features(cnn, cnn_normalization_mean, cnn_normalization_std, style_img, style_layers=this_layers);
+
+  # Check if we're on GPU or CPU, then run! 
+  gpu_str = "Using GPU" if torch.cuda.is_available() else "Using CPU"
+  print("{} to synthesize textures at layer {}, nSplits: {}, image: {}, numSteps: {}".format(gpu_str, args.layer, args.nSplits, img_name, args.nSteps))
+  tStart = time.time()
+  output_leaves = run_texture_synthesis(cnn, cnn_normalization_mean, cnn_normalization_std, style_img, input_img, num_steps=args.nSteps, style_layers=this_layers, saveLoc=[args.out_dir, saveName])
+
+  tElapsed = time.time() - tStart
+  print('Done! {} steps took {} seconds. Saving as {} now.'.format(args.nSteps, tElapsed, saveName))
   # Save final product to output directory
-  saveName = args.nSplits + 'x' + args.nSplits + '_' + args.layer + '_' + img_name + '.png'
   imsave(output_leaves, args.out_dir + '/' + saveName);
 

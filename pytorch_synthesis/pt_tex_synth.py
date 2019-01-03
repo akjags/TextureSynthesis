@@ -11,7 +11,9 @@ import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
 import torchvision.models as models
 
-import copy
+import copy, os
+import pdb
+from pt_synthesize import imsave
 
 style_layers_default = ['conv_1', 'conv_2', 'conv_3', 'conv_4', 'conv_5']
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -69,26 +71,28 @@ def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
     # to put in modules that are supposed to be activated sequentially
     model = nn.Sequential(normalization)
 
-    i = 0  # increment every time we see a pool layer
-    j = 0  # increment for each conv layer within a block
+    i = 1  # increment every time we see a pool layer
+    j = 1  # increment for each conv layer within a block
     for layer in cnn.children():
         if isinstance(layer, nn.Conv2d):
-            j += 1
-            name = 'conv_{}_{}'.format(i, j)
+            name = 'conv{}_{}'.format(i, j)
+            j+=1
         elif isinstance(layer, nn.ReLU):
-            name = 'relu_{}_{}'.format(i, j)
+            name = 'relu{}_{}'.format(i, j)
             layer = nn.ReLU(inplace=False)
         elif isinstance(layer, nn.MaxPool2d):
-            i += 1; j = 0;
-            name = 'pool_{}'.format(i)
+            name = 'pool{}'.format(i)
+            i+=1; j=1;
         elif isinstance(layer, nn.BatchNorm2d):
-            name = 'bn_{}'.format(i)
+            name = 'bn{}'.format(i)
         else:
             raise RuntimeError('Unrecognized layer: {}'.format(layer.__class__.__name__))
 
         model.add_module(name, layer)
 
+        #pdb.set_trace()
         if name in style_layers:
+            #print(name)
             # add style loss:
             target_feature = model(style_img).detach()
             style_loss = StyleLoss(target_feature)
@@ -102,19 +106,20 @@ def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
 
     model = model[:(i + 1)]
 
-    return model, style_losses#, content_losses
+    return model, style_losses
 
 def get_input_optimizer(input_img):
     # this line to show that input is a parameter that requires a gradient
-    optimizer = optim.LBFGS([input_img.requires_grad_()])
+    optimizer = optim.LBFGS([input_img.requires_grad_()], lr=.1)
     return optimizer
 
 def run_texture_synthesis(cnn, normalization_mean, normalization_std,
-                       style_img, input_img, num_steps=300,
+                       style_img, input_img, num_steps=300, saveLoc=None, saveName=None,
                        style_weight=1000000, style_layers=style_layers_default):
     """Run the style transfer."""
     print('Building the style transfer model..')
-    model, style_losses = get_style_model_and_losses(cnn, normalization_mean, normalization_std, style_img, style_layers=style_layers)
+    model, style_losses = get_style_model_and_losses(cnn, normalization_mean, normalization_std, 
+                                                     style_img, style_layers=style_layers)
     optimizer = get_input_optimizer(input_img)
 
     print('Optimizing..')
@@ -139,12 +144,16 @@ def run_texture_synthesis(cnn, normalization_mean, normalization_std,
 
             run[0] += 1
             if run[0] % 50 == 0:
-                print("run {}:".format(run))
-                print('Style Loss : {:4f}'.format(
-                    style_score.item()))
-                print()
+              print('Step #{} style loss: {:4f}'.format(
+                    run[0], style_score.item()))
+            if run[0] % 500 == 0 and saveLoc is not None:
+              tmp = input_img.clone()
+              tmp.data.clamp_(0,1)
+              if not os.path.isdir('{}/iters'.format(saveLoc[0])):
+                os.makedirs('{}/iters'.format(saveLoc[0]))
+              imsave(tmp, '{}/iters/{}_step{}.png'.format(saveLoc[0], saveLoc[1].split('.')[0], run[0]))
 
-            return style_score #+ content_score
+            return style_score 
 
         optimizer.step(closure)
 
@@ -153,3 +162,13 @@ def run_texture_synthesis(cnn, normalization_mean, normalization_std,
 
     return input_img
 
+def get_layer_features(cnn, normalization_mean, normalization_std,
+                       style_img, style_layers=style_layers_default):
+    model, style_losses = get_style_model_and_losses(cnn, normalization_mean, normalization_std, 
+                                                     style_img, style_layers=style_layers)
+    sl = {};
+    for i in range(len(style_layers)):
+        sl[style_layers[i]] = style_losses[i].target;
+
+    return sl
+  
