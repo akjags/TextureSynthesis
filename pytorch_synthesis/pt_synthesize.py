@@ -7,6 +7,7 @@ import torch.optim as optim
 
 from PIL import Image
 import matplotlib.pyplot as plt
+import numpy as np
 
 import torchvision.transforms as transforms
 import torchvision.models as models
@@ -51,11 +52,13 @@ def imsave(tensor, savepath=None):
 if __name__ == "__main__":
   ### Parse arguments
   parser = argparse.ArgumentParser()
-  parser.add_argument("-i", "--img_path", default="/home/users/akshayj/TextureSynthesis/stimuli/textures/orig_color/cherries.jpg", help="specifies the path of the original image")
-  parser.add_argument("-o", "--out_dir", default="/home/users/akshayj/TextureSynthesis/stimuli/textures/out_color/v2", help="specifies the path of the output directory")
-  parser.add_argument("-l", "--layer", default="pool4", help="specifies the layer to match statistics through")
+  parser.add_argument("-d", "--stim_dir", default="/home/users/akshayj/TextureSynthesis/stimuli/textures", help="specifies the base directory in which the stimuli (both input and outputs) will be located")
+  parser.add_argument("-i", "--img_path", default="orig_color/tulips.jpg", help="specifies the path of the original image")
+  parser.add_argument("-o", "--out_dir", default="out_color/pca", help="specifies the path of the output directory")
+  parser.add_argument("-l", "--layer", default="pool2", help="specifies the layer to match statistics through")
   parser.add_argument("-s", "--nSplits", default=1, help="specifies the number of sections to split each dimension into (e.g. 1x1, 2x2, nxn)")
   parser.add_argument('-n', '--nSteps', type=int, default=10000, help="specifies the number of steps to run the gradient descent for")
+  parser.add_argument('-g', '--gramLoss', default='gram', help='specifies the type of gram matrix loss function (choices: "gram", "diag", "pca", or "lda")')
   args = parser.parse_args()
 
   ### PyTorch Models (VGG)
@@ -68,7 +71,7 @@ if __name__ == "__main__":
 
   ### Specify texture synthesis parameters.
   # Load the original image
-  style_img = image_loader(args.img_path)
+  style_img = image_loader(args.stim_dir + '/' + args.img_path)
   img_name = args.img_path.split('/')[-1].split('.')[0] # get just the name (e.g. cherries) without path or extension
 
   # Specify which layers to match
@@ -82,21 +85,35 @@ if __name__ == "__main__":
   input_img = torch.randn(style_img.data.size(), device=device)
 
   # Make directory if it doesn't already exist
-  if not os.path.isdir(args.out_dir):
-    os.makedirs(args.out_dir) 
+  if not os.path.isdir(args.stim_dir + '/' + args.out_dir):
+    os.makedirs(args.stim_dir + '/' + args.out_dir) 
   saveName = '{}x{}_{}_{}.png'.format(args.nSplits, args.nSplits, args.layer, img_name) # e.g. 1x1_pool2_cherries.png
 
   # Get layer features
-  get_layer_features(cnn, cnn_normalization_mean, cnn_normalization_std, style_img, style_layers=this_layers);
+  #get_layer_features(cnn, cnn_normalization_mean, cnn_normalization_std, style_img, style_layers=this_layers);
+
+  # Specify which loss function to use.
+  if args.gramLoss == 'diag':
+    print('Using diagonal of gram matrix to compute style loss')
+    style_loss_func = StyleLossDiag
+  elif args.gramLoss == 'pca':
+    print('Using PCA of gram matrix to compute style loss')
+    style_loss_func = StyleLossPCA
+  elif args.gramLoss == 'lda':
+    print('Using LDA of gram matrix to compute style loss')
+    style_loss_func = StyleLossLDA
+  else:
+    print('Using full gram matrix to compute style loss')
+    style_loss_func = StyleLoss
 
   # Check if we're on GPU or CPU, then run! 
   gpu_str = "Using GPU" if torch.cuda.is_available() else "Using CPU"
   print("{} to synthesize textures at layer {}, nSplits: {}, image: {}, numSteps: {}".format(gpu_str, args.layer, args.nSplits, img_name, args.nSteps))
   tStart = time.time()
-  output_leaves = run_texture_synthesis(cnn, cnn_normalization_mean, cnn_normalization_std, style_img, input_img, num_steps=args.nSteps, style_layers=this_layers, saveLoc=[args.out_dir, saveName])
+  output_leaves = run_texture_synthesis(cnn, cnn_normalization_mean, cnn_normalization_std, style_img, input_img, num_steps=args.nSteps, style_layers=this_layers, saveLoc=[args.stim_dir + '/' + args.out_dir, saveName], style_loss_func=style_loss_func)
 
   tElapsed = time.time() - tStart
   print('Done! {} steps took {} seconds. Saving as {} now.'.format(args.nSteps, tElapsed, saveName))
   # Save final product to output directory
-  imsave(output_leaves, args.out_dir + '/' + saveName);
+  imsave(output_leaves, args.stim_dir + '/' + args.out_dir + '/' + saveName);
 

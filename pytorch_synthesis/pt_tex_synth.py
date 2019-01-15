@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.autograd import Variable
 
 from PIL import Image
 import matplotlib.pyplot as plt
@@ -11,9 +12,13 @@ import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
 import torchvision.models as models
 
+import numpy as np
 import copy, os
 import pdb
 from pt_synthesize import imsave
+
+from sklearn.decomposition import PCA
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 
 style_layers_default = ['conv_1', 'conv_2', 'conv_3', 'conv_4', 'conv_5']
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -32,12 +37,63 @@ def gram_matrix(input):
     return G.div(a * b * c * d)
 
 class StyleLoss(nn.Module):
-    def __init__(self, target_feature):
+    def __init__(self, target_feature, layerName=None):
         super(StyleLoss, self).__init__()
         self.target = gram_matrix(target_feature).detach()
 
     def forward(self, input):
         G = gram_matrix(input)
+        self.loss = F.mse_loss(G, self.target)
+        return input
+
+class StyleLossPCA(nn.Module):
+    def __init__(self, target_feature, layerName):
+        super(StyleLossPCA, self).__init__()
+        self.pca = np.load('/scratch/groups/jlg/texpca/{}_dims.npy'.format(layerName)).item()['pca']
+        self.target = gram_matrix(target_feature).detach().to(device)
+        self.components = torch.from_numpy(self.pca.components_.T).to(device) # nFeatures x nComponents
+        self.pca_mean = torch.from_numpy(self.pca.mean_).to(device).view(1,-1) # (nFeatures,)
+        self.target_pca = self.transform(self.target.view(1,-1))
+        #self.target_pca = torch.from_numpy(self.pca.transform(self.target.detach().cpu().numpy().ravel().reshape(1,-1))).to(device)
+
+    def forward(self, input):
+        #G = torch.from_numpy(self.pca.transform(gram_matrix(input).detach().cpu().numpy().ravel().reshape(1,-1)))
+        #G = Variable(G.to(device).data, requires_grad=True)
+        #G = torch.mm(gram_matrix(input).view(1,-1), self.components)
+        G = self.transform(gram_matrix(input).view(1,-1))
+        self.loss = F.mse_loss(G, self.target_pca)
+        return input
+
+    def transform(self, mtx):
+        mtx_pca = torch.mm(mtx - self.pca_mean, self.components)
+        return mtx_pca
+
+class StyleLossLDA(nn.Module):
+    def __init__(self, target_feature, layerName):
+        super(StyleLossLDA, self).__init__()
+        self.lda = np.load('/scratch/groups/jlg/texpca/{}_dims.npy'.format(layerName)).item()['lda']
+        self.target = gram_matrix(target_feature).detach().to(device)
+        self.components = torch.from_numpy(self.lda.scalings_).to(device) # nFeatures x nDimensions
+        self.lda_xbar = torch.from_numpy(self.lda.xbar_).to(device).view(1,-1) # (nFeatures,)
+        #pdb.set_trace()
+        self.target_lda = self.transform(self.target.view(1,-1))
+
+    def forward(self, input):
+        G = self.transform(gram_matrix(input).view(1,-1))
+        self.loss = F.mse_loss(G, self.target_lda)
+        return input
+
+    def transform(self, mtx):
+        mtx_lda = torch.mm((mtx - self.lda_xbar).float(), self.components.float())
+        return mtx_lda
+
+class StyleLossDiag(nn.Module):
+    def __init__(self, target_feature, layerName=None):
+        super(StyleLossDiag, self).__init__()
+        self.target = torch.diag(gram_matrix(target_feature).detach())
+
+    def forward(self, input):
+        G = torch.diag(gram_matrix(input))
         self.loss = F.mse_loss(G, self.target)
         return input
 
@@ -57,7 +113,7 @@ class Normalization(nn.Module):
     
 
 def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
-                               style_img, style_layers, device=device):
+                               style_img, style_layers, device=device, style_loss_func=StyleLoss):
     cnn = copy.deepcopy(cnn)
 
     # normalization module
@@ -95,13 +151,13 @@ def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
             #print(name)
             # add style loss:
             target_feature = model(style_img).detach()
-            style_loss = StyleLoss(target_feature)
+            style_loss = style_loss_func(target_feature, name)
             model.add_module("style_loss_{}".format(i), style_loss)
             style_losses.append(style_loss)
 
     # now we trim off the layers after the last content and style losses
     for i in range(len(model) - 1, -1, -1):
-        if isinstance(model[i], StyleLoss):
+        if isinstance(model[i], style_loss_func):
             break
 
     model = model[:(i + 1)]
@@ -115,11 +171,12 @@ def get_input_optimizer(input_img):
 
 def run_texture_synthesis(cnn, normalization_mean, normalization_std,
                        style_img, input_img, num_steps=300, saveLoc=None, saveName=None,
-                       style_weight=1000000, style_layers=style_layers_default):
+                       style_weight=1000000, style_layers=style_layers_default, 
+                       style_loss_func=StyleLoss):
     """Run the style transfer."""
     print('Building the style transfer model..')
     model, style_losses = get_style_model_and_losses(cnn, normalization_mean, normalization_std, 
-                                                     style_img, style_layers=style_layers)
+                                                     style_img, style_layers=style_layers, style_loss_func=style_loss_func)
     optimizer = get_input_optimizer(input_img)
 
     print('Optimizing..')
