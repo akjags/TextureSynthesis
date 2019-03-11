@@ -37,7 +37,7 @@ def gram_matrix(input):
     return G.div(a * b * c * d)
 
 class StyleLoss(nn.Module):
-    def __init__(self, target_feature, layerName=None):
+    def __init__(self, target_feature, **kwargs):
         super(StyleLoss, self).__init__()
         self.target = gram_matrix(target_feature).detach()
 
@@ -47,19 +47,17 @@ class StyleLoss(nn.Module):
         return input
 
 class StyleLossPCA(nn.Module):
-    def __init__(self, target_feature, layerName):
+    def __init__(self, target_feature, layerName, which_pc = None, pc_step_size=None, pc_layer = 'pool2'):
         super(StyleLossPCA, self).__init__()
-        self.pca = np.load('/scratch/groups/jlg/texpca/{}_dims.npy'.format(layerName)).item()['pca']
+        self.pca = np.load('/scratch/groups/jlg/texpca/{}_dims_histmatch.npy'.format(layerName)).item()['pca']
         self.target = gram_matrix(target_feature).detach().to(device)
         self.components = torch.from_numpy(self.pca.components_.T).to(device) # nFeatures x nComponents
         self.pca_mean = torch.from_numpy(self.pca.mean_).to(device).view(1,-1) # (nFeatures,)
         self.target_pca = self.transform(self.target.view(1,-1))
-        #self.target_pca = torch.from_numpy(self.pca.transform(self.target.detach().cpu().numpy().ravel().reshape(1,-1))).to(device)
+        if which_pc is not None and layerName == pc_layer:
+            self.target_pca[0,which_pc] = self.target_pca[0,which_pc] + pc_step_size
 
     def forward(self, input):
-        #G = torch.from_numpy(self.pca.transform(gram_matrix(input).detach().cpu().numpy().ravel().reshape(1,-1)))
-        #G = Variable(G.to(device).data, requires_grad=True)
-        #G = torch.mm(gram_matrix(input).view(1,-1), self.components)
         G = self.transform(gram_matrix(input).view(1,-1))
         self.loss = F.mse_loss(G, self.target_pca)
         return input
@@ -68,33 +66,49 @@ class StyleLossPCA(nn.Module):
         mtx_pca = torch.mm(mtx - self.pca_mean, self.components)
         return mtx_pca
 
-class StyleLossLDA(nn.Module):
-    def __init__(self, target_feature, layerName):
-        super(StyleLossLDA, self).__init__()
-        self.lda = np.load('/scratch/groups/jlg/texpca/{}_dims.npy'.format(layerName)).item()['lda']
+class StyleLossNMF(nn.Module):
+    def __init__(self, target_feature, layerName, which_pc = None, pc_step_size=None, pc_layer='pool2', **kwargs):
+        super(StyleLossNMF, self).__init__()
+        self.nmf = np.load('/scratch/groups/jlg/texpca/{}_dims_nmf.npy'.format(layerName)).item()['nmf']
         self.target = gram_matrix(target_feature).detach().to(device)
-        self.components = torch.from_numpy(self.lda.scalings_).to(device) # nFeatures x nDimensions
-        self.lda_xbar = torch.from_numpy(self.lda.xbar_).to(device).view(1,-1) # (nFeatures,)
-        #pdb.set_trace()
-        self.target_lda = self.transform(self.target.view(1,-1))
+        self.components = torch.from_numpy(self.nmf.components_.T).to(device) # nFeatures x nDimensions
+        self.target_nmf = self.transform(self.target.view(1,-1))
+        print(self.target_nmf.shape)
+        if which_pc is not None and layerName == pc_layer:
+          self.target_nmf[0,which_pc] = self.target_nmf[0,which_pc] + pc_step_size
 
     def forward(self, input):
         G = self.transform(gram_matrix(input).view(1,-1))
-        self.loss = F.mse_loss(G, self.target_lda)
+        self.loss = F.mse_loss(G, self.target_nmf)
         return input
 
     def transform(self, mtx):
-        mtx_lda = torch.mm((mtx - self.lda_xbar).float(), self.components.float())
+        mtx_lda = torch.mm(torch.abs(mtx), self.components.float())
         return mtx_lda
 
 class StyleLossDiag(nn.Module):
-    def __init__(self, target_feature, layerName=None):
+    def __init__(self, target_feature, **kwargs):
         super(StyleLossDiag, self).__init__()
         self.target = torch.diag(gram_matrix(target_feature).detach())
 
     def forward(self, input):
         G = torch.diag(gram_matrix(input))
         self.loss = F.mse_loss(G, self.target)
+        return input
+
+class StyleLossPool2(nn.Module):
+    def __init__(self, target_feature, layerName=None):
+        super(StyleLossPool2, self).__init__()
+        if layerName == 'pool2':
+            self.target = 10000*torch.ones_like(target_feature)
+        else:
+            self.target = torch.zeros_like(target_feature)
+
+    def forward(self, input):
+        pdb.set_trace()
+        assert (input >= 0. & input <= 1.).all()
+
+        self.loss = F.mse_loss(input, self.target)
         return input
 
 # create a module to normalize input image so we can easily put it in a nn.Sequential
@@ -113,7 +127,8 @@ class Normalization(nn.Module):
     
 
 def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
-                               style_img, style_layers, device=device, style_loss_func=StyleLoss):
+                               style_img, style_layers, device=device, style_loss_func=StyleLoss,
+                               which_pc = None, pc_step_size = None):
     cnn = copy.deepcopy(cnn)
 
     # normalization module
@@ -146,12 +161,10 @@ def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
 
         model.add_module(name, layer)
 
-        #pdb.set_trace()
         if name in style_layers:
-            #print(name)
-            # add style loss:
             target_feature = model(style_img).detach()
-            style_loss = style_loss_func(target_feature, name)
+            style_loss = style_loss_func(target_feature, layerName=name, which_pc=which_pc, 
+                                          pc_step_size = pc_step_size)
             model.add_module("style_loss_{}".format(i), style_loss)
             style_losses.append(style_loss)
 
@@ -170,13 +183,15 @@ def get_input_optimizer(input_img):
     return optimizer
 
 def run_texture_synthesis(cnn, normalization_mean, normalization_std,
-                       style_img, input_img, num_steps=300, saveLoc=None, saveName=None,
+                       style_img, input_img, num_steps=300, saveLoc=None, saveName=None, saveInterval=500,
                        style_weight=1000000, style_layers=style_layers_default, 
-                       style_loss_func=StyleLoss):
+                       style_loss_func=StyleLoss, which_pc=None, pc_step_size=None):
     """Run the style transfer."""
     print('Building the style transfer model..')
     model, style_losses = get_style_model_and_losses(cnn, normalization_mean, normalization_std, 
-                                                     style_img, style_layers=style_layers, style_loss_func=style_loss_func)
+                                                     style_img, style_layers=style_layers, 
+                                                     style_loss_func=style_loss_func, which_pc=which_pc,
+                                                     pc_step_size=pc_step_size)
     optimizer = get_input_optimizer(input_img)
 
     print('Optimizing..')
@@ -203,7 +218,7 @@ def run_texture_synthesis(cnn, normalization_mean, normalization_std,
             if run[0] % 50 == 0:
               print('Step #{} style loss: {:4f}'.format(
                     run[0], style_score.item()))
-            if run[0] % 500 == 0 and saveLoc is not None:
+            if run[0] % saveInterval == 0 and saveLoc is not None:
               tmp = input_img.clone()
               tmp.data.clamp_(0,1)
               if not os.path.isdir('{}/iters'.format(saveLoc[0])):

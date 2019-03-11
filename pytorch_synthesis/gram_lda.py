@@ -16,8 +16,10 @@ from pt_tex_synth import *
 import argparse, pdb
 from pt_synthesize import *
 
+from sklearn.decomposition import PCA, NMF
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+
 ###
-thisLayer = 'pool2';
 tex_dir = '/scratch/groups/jlg/texture_db'
 
 def get_feature_maps(thisLayer, tex_dir=tex_dir, save_feature_maps=1):
@@ -63,7 +65,7 @@ def get_feature_maps(thisLayer, tex_dir=tex_dir, save_feature_maps=1):
     fmaps = {}
     fmaps['labels'] = labels
     fmaps['{}_features'.format(thisLayer)] = feature_maps
-    np.save('/scratch/groups/jlg/texpca/{}_features.npy'.format(thisLayer), fmaps)
+    np.save('/scratch/groups/jlg/texpca/{}_features_histmatch.npy'.format(thisLayer), fmaps)
   return feature_maps, labels
 
 
@@ -76,4 +78,31 @@ def run_pca():
 
   print('{} percent variance explained by first 10 features'.format(np.sum(explained_variance)))
 
+tex_dir='/scratch/groups/jlg/tex_db_histmatch'
+layers = ['conv1_1', 'pool1', 'pool2']
 
+for li in range(len(layers)):
+  thisLayer = layers[li]
+  print('Running on layer: ', thisLayer)
+  #fm, labels = get_feature_maps(thisLayer, tex_dir=tex_dir, save_feature_maps=1)
+  fmaps = np.load('/scratch/groups/jlg/texpca/{}_features_histmatch.npy'.format(thisLayer)).item()
+  fm,labels = fmaps['{}_features'.format(thisLayer)], fmaps['labels']
+
+  print('Done getting feature maps. Now running PCA and LDA')
+  X = np.abs(fm.T)
+  nmf = NMF(n_components=20, init='random')
+  nmf.fit(X)
+  p2 = {};
+  p2['nmf'] = nmf;
+
+  #pca = PCA(n_components=20)
+  #pca.fit(X)
+  #lda = LinearDiscriminantAnalysis(n_components=20)
+  #lda.fit(X,labels)
+
+  #p2 = {};
+  #p2['pca'] = pca
+  #p2['lda'] = lda
+
+  np.save('/scratch/groups/jlg/texpca/{}_dims_nmf.npy'.format(thisLayer), p2)
+  print('Saving to /scratch/groups/jlg/texpca')
