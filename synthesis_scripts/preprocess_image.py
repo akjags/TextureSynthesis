@@ -1,6 +1,7 @@
 from skimage.io import imread
 import os
 import numpy as np
+import sys
 
 def preprocess_im(path):
     MEAN_VALUES = np.array([123.68, 116.779, 103.939]).reshape((1,1,1,3))
@@ -14,11 +15,10 @@ def preprocess_im(path):
 
 if __name__ == "__main__":
     # First, preprocess the images.
-    orig_ims = os.listdir('orig_ims2/')
+    args = sys.argv
+    orig_im_dir = args[1]
+    img_name = args[2]
 
-    for im in orig_ims:
-        if '.jpg' in im:
-            imName = im.split('.')[0]
-            new_im = preprocess_im('orig_ims2/'+im)
-            np.save('orig_ims2/'+imName, new_im)
-            print 'Preprocessed image ' + imName + ' saved' 
+    new_im = preprocess_im(orig_im_dir+'/'+img_name+'.png')
+    np.save(orig_im_dir+'/'+img_name, new_im)
+    print 'Preprocessed image ' + img_name + ' saved'
