@@ -4,7 +4,7 @@ import sys
 
 from ImageUtils import *
 from model import *
-from skimage.io import imread
+from skimage.io import imread, imsave
 
 SAVE_STEP = 1000
 
