@@ -1,8 +1,4 @@
-# TextureSynthesis
-Tensorflow implementation of the algorithm described in Gatys et al., 2015.
+# Texture Synthesis
+This repository contains the code, figures, and notebooks used for synthesizing the textures used as stimuli in behavioral and neuroimaging experiments.
 
-To run, execute the following:
-```python
-mkdir output
-python main.py
-```
+Contact: akshayj at stanford dot edu
