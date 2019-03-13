@@ -15,7 +15,6 @@ import torchvision.models as models
 import numpy as np
 import copy, os
 import pdb
-from pt_synthesize import imsave
 
 from sklearn.decomposition import PCA
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
@@ -243,4 +242,13 @@ def get_layer_features(cnn, normalization_mean, normalization_std,
         sl[style_layers[i]] = style_losses[i].target;
 
     return sl
+
+# Plotting and saving functions.
+unloader = transforms.ToPILImage()  # reconvert into PIL image
+
+def imsave(tensor, savepath=None):
+    image = tensor.cpu().clone()
+    image = image.squeeze(0)
+    image = unloader(image)
+    image.save(savepath)
   
