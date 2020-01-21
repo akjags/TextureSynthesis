@@ -3,108 +3,219 @@ import tensorflow as tf
 import sys, os
 import time
 
+from collections import OrderedDict
 from ImageUtils import *
 from model import *
 
-SAVE_STEP = 1000
 
 class SpatialTextureSynthesis:
-    def __init__(self, model, actual_image, layer_constraints, model_name, saveDir, iterations, nSplits):
-        # 'layer_constraints' is dictionary with key = VGG layer and value = weight (w_l)
-        # 'sess' is tensorflow session
-        self.model_name = model_name # Of the form: conv#
+    def __init__(self, model, original_image, guides, style_loss_layer_weights, saveParams, iterations=5000):
+        '''
+        Initializes a Spatial Texture Synthesis object
 
-        self.sess = tf.Session()
-        self.sess.run(tf.initialize_all_variables())
+        - Required Arguments:
+            - 'model': this is a Tensorflow model which should be defined like model.py
+            - 'original_image': a 256x256x3 image 
+         'style_loss_layer_weights' is dictionary with key = VGG layer and value = weight (w_l)
+        'sess' is tensorflow session
 
+        '''
+        tf.disable_eager_execution()
+
+        # Get the model and layers.
         self.model = model # Model instance
         assert self.model.model_initialized(), "Model not created yet."
         self.model_layers = self.model.get_model()
 
-        # Layer weights for the loss function
-        self.layer_weights = layer_constraints
-        self.actual_image = actual_image # 256x256x3
-        self.pooling_weights_path = '/home/users/akshayj/TextureSynthesis/tensorflow_synthesis/subset_weights'
-        self.RF_option = 'tile'
+        # Initialize session
+        self.sess = tf.Session()
+        self.sess.run(tf.initialize_all_variables())
 
-        # Number of splits
-        self.nSpl = nSplits
+        # Layer weights for the loss function
+        self.style_loss_layer_weights = style_loss_layer_weights
+        self.original_image = original_image # 256x256x3
+        #self.pooling_weights_path = '/home/users/akshayj/TextureSynthesis/tensorflow_synthesis/subset_weights'
+        #self.RF_option = 'tile'
 
         # Directory to save outputs in
-        self.saveDir = saveDir
+        if 'saveDir' in saveParams:
+            self.saveDir = saveParams['saveDir']
+        else:
+            self.saveDir = '.'
+
+        if 'saveName' in saveParams:
+            self.saveName = saveParams['saveName']
+        else:
+            self.saveName = 'unnamedtexture'
 
         # Number of iterations to run for
         self.iterations = iterations
 
         # Image size and network output size
-        self.imsize = self.actual_image.shape[1]
-        start_time = time.time()
-        self.net_size = get_net_size()
-        elapsed_time = time.time() - start_time
-        print('Getting net size took {} seconds'.format(elapsed_time))
+        self.imsize = self.original_image.shape[1]
 
-
-        # Get subset boundaries
-        start_time = time.time()
-        self.subset_boundaries = self.get_subset_boundaries(option=self.RF_option)
-        elapsed_time = time.time() - start_time
-        print('Getting subset boundaries took {} seconds'.format(elapsed_time))
-
-        # precompute layer subset weights
-        start_time = time.time()
-        layer_subset_weights_path = '{}/{}x{}_{}.npy'.format(self.pooling_weights_path, self.nSpl, self.nSpl, self.RF_option)
-        if os.path.isfile(layer_subset_weights_path):
-            self.layer_subset_weights = np.load(layer_subset_weights_path).item()
-            print(layer_subset_weights_path, self.layer_subset_weights.keys())
+        # Guides
+        if guides is None or guides == 'all':
+            self.guides = ones(original_image.shape)
         else:
-            print('Pre-saved weights not found, so computing layer subset weights and saving to {}'.format(layer_subset_weights_path))
-            self.layer_subset_weights = self.precompute_layer_subset_weights(layer_subset_weights_path)
-        elapsed_time = time.time() - start_time
-        print('Precomputing layer subset weights took {} seconds'.format(elapsed_time))
+            self.guides = guides
+        self.fm_guides = self.get_fm_guides(layers=self.style_loss_layer_weights, mode='inside')
+        for layer in self.style_loss_layer_weights: #normalise fm guides
+            self.fm_guides[layer] = self.fm_guides[layer]/np.sqrt(np.diag(self.gram_matrix(self.fm_guides[layer])))
 
-        # Get constraints
-        start_time = time.time()
+        # # Network output size
+        # start_time = time.time()
+        # self.net_size = get_net_size()
+        # elapsed_time = time.time() - start_time
+        # print('Getting net size took {} seconds'.format(elapsed_time))
+
+        # # Get subset boundaries
+        # start_time = time.time()
+        # self.subset_boundaries = self.get_subset_boundaries(option=self.RF_option)
+        # elapsed_time = time.time() - start_time
+        # print('Getting subset boundaries took {} seconds'.format(elapsed_time))
+
+        # # precompute layer subset weights
+        # start_time = time.time()
+        # layer_subset_weights_path = '{}/{}x{}_{}.npy'.format(self.pooling_weights_path, self.nSpl, self.nSpl, self.RF_option)
+        # if os.path.isfile(layer_subset_weights_path):
+        #     self.layer_subset_weights = np.load(layer_subset_weights_path).item()
+        #     print(layer_subset_weights_path, self.layer_subset_weights.keys())
+        # else:
+        #     print('Pre-saved weights not found, so computing layer subset weights and saving to {}'.format(layer_subset_weights_path))
+        #     self.layer_subset_weights = self.precompute_layer_subset_weights(layer_subset_weights_path)
+        # elapsed_time = time.time() - start_time
+        # print('Precomputing layer subset weights took {} seconds'.format(elapsed_time))
+
+        # # Get constraints
+        # start_time = time.time()
         self.constraints = self._get_constraints() # {layer_name: activations}
-        elapsed_time = time.time() - start_time
-        print('Getting constraints took {} seconds'.format(elapsed_time))
+        # elapsed_time = time.time() - start_time
+        # print('Getting constraints took {} seconds'.format(elapsed_time))
 
+    def get_fm_guides(self, layers, mode='inside', th=0.5, batch_size=1):
+        fm_guides = OrderedDict()
+        n_guides = self.guides.shape[2]
+        for m in range(n_guides):
+            guide = self.guides[:,:,m]
+            guide[guide<th] = 0
+            guide[guide>=th] = 1
+
+            if mode=='all':
+                probe_image = np.zeros((batch_size,) + guide.shape + (3,))
+                probe_image[:,:, guide.astype(bool)] += 1e2 * np.random.randn(*probe_image[:,:,guide.astype(bool)].shape)
+                feature_maps = self._get_activations(image=probe_image, layers=layers)
+                for layer in layers:
+                    if m==0:
+                        fm_guides[layer] = []
+                    fm_guides[layer].append((feature_maps[layer].var(0).mean(0)!=0).astype(float))
+
+            elif mode=='inside':
+                inv_guide = guide.copy()-1
+                inv_guide *= -1
+                probe_image_out = np.zeros((batch_size,) + inv_guide.shape + (3,))
+                #print(probe_image_out.shape, inv_guide.shape)
+                probe_image_out[:,inv_guide.astype(bool), :] += 1e2 * np.random.randn(*probe_image_out[:,inv_guide.astype(bool),:].shape)
+                feature_maps_out = self._get_activations(image=probe_image_out, layers=layers)
+
+                for layer in layers:
+                    if m==0:
+                        fm_guides[layer] = []
+                    #print(feature_maps_out[layer].shape, feature_maps_out[layer].var(0).shape, feature_maps_out[layer].var(0).mean(-1).shape)
+                    fm_guides[layer].append((feature_maps_out[layer].var(0).mean(-1)==0).astype(float))
+        for layer in layers:
+            fm_guides[layer] = np.stack(fm_guides[layer])
+        return fm_guides
+        
+            
 
     def get_texture_loss(self):
         total_loss = 0.0
-        for layer in self.layer_weights.keys():
-            print layer
+        for layer in self.style_loss_layer_weights.keys():
+            print(layer)
             layer_activations = self.model_layers[layer]
             layer_activations_shape = layer_activations.get_shape().as_list()
-            assert len(layer_activations_shape) == 4 # (1, H, W, outputs)
-            assert layer_activations_shape[0] == 1, "Only supports 1 image at a time."
+            #assert len(layer_activations_shape) == 4 # (1, H, W, outputs)
+            #assert layer_activations_shape[0] == 1, "Only supports 1 image at a time."
             num_filters = layer_activations_shape[3] # N
             num_spatial_locations = layer_activations_shape[1] * layer_activations_shape[2] # M
-            layer_gram_matrix = self._compute_weighted_gram_matrix(layer, layer_activations, num_filters, num_spatial_locations)
+            #layer_gram_matrix = self._compute_weighted_gram_matrix(layer, layer_activations, num_filters, num_spatial_locations)
+            layer_gram_matrix = self.gram_matrix_guided_tf(layer_activations, self.fm_guides[layer])
             desired_gram_matrix = self.constraints[layer]
 
-            total_loss += self.layer_weights[layer] * (1.0 / (4 * (num_filters**2) * (num_spatial_locations**2))) \
+            total_loss += self.style_loss_layer_weights[layer] * (1.0 / (4 * (num_filters**2) * (num_spatial_locations**2))) \
                           * tf.reduce_sum(tf.pow(desired_gram_matrix - layer_gram_matrix, 2))
         return total_loss
 
     def _get_constraints(self):
         self.sess.run(tf.initialize_all_variables())
         constraints = dict()
-        for layer in self.layer_weights:
-            self.sess.run(self.model_layers['input'].assign(self.actual_image))
+        for layer in self.style_loss_layer_weights:
+            self.sess.run(self.model_layers['input'].assign(self.original_image))
             layer_activations = self.sess.run(self.model_layers[layer])
-            num_filters = layer_activations.shape[3] # N
-            num_spatial_locations = layer_activations.shape[1] * layer_activations.shape[2] # M
-            print layer_activations.shape
-            constraints[layer] = self._compute_weighted_gram_matrix_np(layer, layer_activations, num_filters, num_spatial_locations)
+            #num_filters = layer_activations.shape[3] # N
+            #num_spatial_locations = layer_activations.shape[1] * layer_activations.shape[2] # M
+            #print(layer_activations.shape)
+            #constraints[layer] = self._compute_weighted_gram_matrix_np(layer, layer_activations, num_filters, num_spatial_locations)
+            constraints[layer] = self.gram_matrix_guided(layer_activations, self.fm_guides[layer])
+            #print(constraints[layer].shape)
         return constraints
 
-    def _get_activations(self):
+    def _get_activations(self, image=None, layers=None):
+        if layers is None:
+            layers = self.style_loss_layer_weights
+        if image is None:
+            image = self.original_image
+        
         self.sess.run(tf.initialize_all_variables())
-        activations = dict()
-        for layer in self.layer.weights:
-            self.sess.run(self.model_layers['input'].assign(self.actual_image))
+        activations = OrderedDict()
+        for layer in layers:
+            self.sess.run(self.model_layers['input'].assign(image))
             activations[layer] = self.sess.run(self.model_layers[layer])
         return activations
+
+    def gram_matrix(self, activations):
+        n_fm = activations.shape[-1]
+        F = activations.reshape(n_fm,-1)
+        G = F.dot(F.T) / F[0,:].size
+        return G
+
+    def gram_matrix_guided_tf(self, activations, guides):
+        '''
+        guides is array of dimensions (n_ch,h,w) that defines n_ch guidance channels
+        guides should be normalised as: guides = guides / np.sqrt(np.diag(gram_matrix(guides)))[:,None,None]
+        activations are of dimensions (n_fm,h,w), the n_fm feature maps of a CNN layer
+        Output are n_ch gram matrices, that were computed with the feature maps weighted by the guidance channel
+        '''
+        print('GRAM_MATRIX_GUIDED', activations.shape, guides.shape)
+        n_pos = activations.shape[0]*activations.shape[1]
+        n_fm = activations.shape[-1]    # number of feature maps
+        n_ch = guides.shape[0]          # number of guidance channels
+        G = tf.zeros((n_fm,n_fm,1))
+        for c in range(n_ch):
+            F = tf.multiply(tf.squeeze(activations), tf.cast(tf.expand_dims(guides[c,:,:],-1), tf.float32))
+            F = tf.cast(tf.reshape(F, (n_fm,-1)), tf.float32)
+
+            F2 = tf.expand_dims(tf.matmul(F, tf.transpose(F)) / tf.cast(n_pos, tf.float32),-1)
+            G = tf.concat(values=[G, F2], axis=2)
+        return G[:,:,1:]
+
+    def gram_matrix_guided(self, activations, guides):
+        '''
+        guides is array of dimensions (n_ch,h,w) that defines n_ch guidance channels
+        guides should be normalised as: guides = guides / np.sqrt(np.diag(gram_matrix(guides)))[:,None,None]
+        activations are of dimensions (n_fm,h,w), the n_fm feature maps of a CNN layer
+        Output are n_ch gram matrices, that were computed with the feature maps weighted by the guidance channel
+        '''
+        print('GRAM_MATRIX_GUIDED', activations.shape, guides.shape)
+        n_fm = activations.shape[-1]    # number of feature maps
+        n_ch = guides.shape[0]          # number of guidance channels
+        G = np.zeros((n_fm,n_fm,n_ch))
+        for c in range(n_ch):
+            F = (np.squeeze(activations) * np.expand_dims(guides[c,:,:],-1)).reshape(n_fm,-1)
+            G[:,:,c] = F.dot(F.T) / F[0,:].size
+        return G
+
 
     def _compute_gram_matrix_np(self, F, N, M):
         F = F.reshape(M, N)
@@ -166,7 +277,7 @@ class SpatialTextureSynthesis:
             subset_weights = np.reshape(weight_mtx[:,:,si], (M,1))
             weighted_F = np.multiply(F, subset_weights)
 
-            print weighted_F.shape
+            print(weighted_F.shape)
 
             dp = np.matmul(weighted_F.T, weighted_F).reshape((N,N,1))
             F2 = np.concatenate((F2,dp), axis=2)
@@ -185,7 +296,7 @@ class SpatialTextureSynthesis:
         lsub_weights = {}
         for layI in range(len(layer_names)):
             lname = layer_names[layI]
-            if lname not in self.layer_weights.keys():
+            if lname not in self.style_loss_layer_weights.keys():
                 print('Skipping layer {}'.format(lname))
                 continue
             out_size = int(self.net_size['out_size'][layI])
@@ -208,9 +319,9 @@ class SpatialTextureSynthesis:
         input_size = self.model_layers["input"].get_shape().as_list()
         return np.random.randn(input_size[0], input_size[1], input_size[2], input_size[3])
 
-    def train(self, sampleIdx=1):
+    def train(self, sampleIdx=1, SAVE_STEP=1000):
         self.sess.run(tf.initialize_all_variables())
-        self.sess.run(self.model_layers["input"].assign(self.actual_image))
+        self.sess.run(self.model_layers["input"].assign(self.original_image))
 
         content_loss = self.get_texture_loss()
         optimizer = tf.train.AdamOptimizer(2.0)
@@ -222,11 +333,11 @@ class SpatialTextureSynthesis:
         for i in range(self.iterations):
             self.sess.run(train_step)
             if i % 10 == 0:
-                print "Iteration: " + str(i) + "; Loss: " + str(self.sess.run(content_loss))
+                print("Iteration: " + str(i) + "; Loss: " + str(self.sess.run(content_loss)))
             if i % SAVE_STEP == 0:
-                print "Saving image..."
+                print("Saving image...")
                 curr_img = self.sess.run(self.model_layers["input"])
-                filename = self.saveDir + "/{}x{}_{}_{}_smp{}_step_{}".format(self.nSpl, self.nSpl, self.model_name, self.image_name, sampleIdx, i)
+                filename = "{}/{}x{}_{}_{}_smp{}_step_{}".format(self.saveDir, self.saveName, sampleIdx, i)
                 save_image(filename, curr_img)
             sys.stdout.flush()
     

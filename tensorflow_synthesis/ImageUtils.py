@@ -30,5 +30,5 @@ def _save_image(path, image):
 
 if __name__ == "__main__":
     image = load_image("texture_images/pine_shoots.jpg")
-    print image.shape
+    print(image.shape)
 

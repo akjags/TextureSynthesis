@@ -1,14 +1,25 @@
 import tensorflow as tf
 import numpy as np
 
-from VGGWeights import *
-from Utils import *
+#from VGGWeights import *
+#from Utils import *
 
 HEIGHT = 256
 WIDTH = 256
 CHANNELS = 3
 
-class Model:
+class Utils:
+    """ Defines a set of utility functions to build layers. Tensorflow
+        filter format is: [H, W, in_channels, out_channels]
+    """
+
+    def conv2d_relu(self, layer, filters, bias, strides, padding):
+        return tf.nn.relu(tf.nn.conv2d(layer, filter=filters, strides=strides, padding=padding) + bias)
+
+    def avg_pool(self, layer, kernel_size, stride, padding):
+        return tf.nn.avg_pool(layer, ksize=kernel_size, strides=stride, padding=padding)
+
+class VGG19:
     """ Takes in as argument the class that defines how to obtain pretrained weights.
         Tensorflow takes filters with shape:
             [filter_height, filter_width, in_channels, out_channels]
@@ -42,7 +53,7 @@ class Model:
 
     def build_model(self):
         # Shape: [out_channels, in_channels, filter_height, filter_width]
-        all_weights = self.weights.get_normalized_vgg_weights()
+        all_weights = self.weights
 
         # Input image size
         #self.model["input"] = tf.placeholder(tf.float32, shape=(1, HEIGHT, WIDTH, CHANNELS))
@@ -127,7 +138,7 @@ class Model:
 
     def print_model(self):
         for key in self.model:
-            print key + " shape: " + str(self.model[key].get_shape().as_list())
+            print(key + " shape: " + str(self.model[key].get_shape().as_list()))
 
     def _transpose_weights(self, weights):
         # This assumes weights format: [out_channels, in_channels, H, W]

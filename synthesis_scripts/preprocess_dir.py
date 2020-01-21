@@ -16,6 +16,7 @@ def preprocess_im(path):
     if len(image.shape)<4:
         image = np.stack((image,image,image),axis=3)
 
+    # If there is a Alpha channel, just scrap it
     if image.shape[3] == 4:
         image = image[:,:,:,:3]
 
