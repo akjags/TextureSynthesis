@@ -9,6 +9,8 @@ def preprocess_im(path):
     # Resize the image for convnet input, there is no change but just
     # add an extra dimension.
     image = np.reshape(image, ((1,) + image.shape))
+    if len(image.shape)<4:
+      image = np.stack((image, image, image), axis=3)
     # Input to the VGG model expects the mean to be subtracted.
     image = image - MEAN_VALUES
     return image
