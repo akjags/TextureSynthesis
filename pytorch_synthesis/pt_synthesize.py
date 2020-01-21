@@ -92,6 +92,7 @@ if __name__ == "__main__":
 
   # Save as: e.g. 1x1_pool2_cherries.png
   saveName = '{}x{}_{}_{}.png'.format(args.nSplits, args.nSplits, args.layer, img_name)
+  saveInterval=100
 
   # Specify which loss function to use.
   if args.gramLoss == 'diag':
@@ -125,7 +126,7 @@ if __name__ == "__main__":
                                         input_img, num_steps=args.nSteps, style_layers=this_layers, 
                                         saveLoc=[args.stim_dir + '/' + args.out_dir, saveName], 
                                         style_loss_func=style_loss_func, which_pc=args.which_pc, 
-                                        pc_step_size = args.pc_step_size)
+                                        pc_step_size = args.pc_step_size, saveInterval=saveInterval)
 
   tElapsed = time.time() - tStart
   print('Done! {} steps took {} seconds. Saving as {} now.'.format(args.nSteps, tElapsed, saveName))

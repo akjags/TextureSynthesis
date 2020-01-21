@@ -7,7 +7,6 @@ import torch.optim as optim
 from torch.autograd import Variable
 
 from PIL import Image
-import matplotlib.pyplot as plt
 
 import torchvision.transforms as transforms
 import torchvision.models as models
@@ -38,6 +37,7 @@ def gram_matrix(input):
 class StyleLoss(nn.Module):
     def __init__(self, target_feature, **kwargs):
         super(StyleLoss, self).__init__()
+        self.activation = target_feature.detach()
         self.target = gram_matrix(target_feature).detach()
 
     def forward(self, input):
@@ -239,9 +239,20 @@ def get_layer_features(cnn, normalization_mean, normalization_std,
                                                      style_img, style_layers=style_layers)
     sl = {};
     for i in range(len(style_layers)):
-        sl[style_layers[i]] = style_losses[i].target;
+        sl[style_layers[i]] = style_losses[i].target.cpu().detach().numpy();
 
     return sl
+
+def get_layer_activations(cnn, normalization_mean, normalization_std,
+                       style_img, style_layers=style_layers_default):
+    model, style_losses = get_style_model_and_losses(cnn, normalization_mean, normalization_std, 
+                                                     style_img, style_layers=style_layers)
+    sl = {};
+    for i in range(len(style_layers)):
+        sl[style_layers[i]] = style_losses[i].activation.cpu().detach().numpy();
+
+    return sl
+
 
 # Plotting and saving functions.
 unloader = transforms.ToPILImage()  # reconvert into PIL image

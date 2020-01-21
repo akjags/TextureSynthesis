@@ -82,10 +82,6 @@ for li in range(len(layers)):
 
   print('Done getting feature maps. Now running PCA and LDA')
   X = np.abs(fm.T)
-  #nmf = NMF(n_components=20, init='random')
-  #nmf.fit(X)
-  #p2 = {};
-  #p2['nmf'] = nmf;
 
   pca = PCA(n_components=20)
   pca.fit(X)
@@ -94,7 +90,7 @@ for li in range(len(layers)):
   p2['pca'] = pca
 
   print('Saving to /scratch/groups/jlg/texpca')
-  np.save('/scratch/groups/jlg/texpca/{}_dims_nmf.npy'.format(thisLayer), p2)
+  np.save('/scratch/groups/jlg/texpca/{}_pca_dims.npy'.format(thisLayer), p2)
   fmaps = {}
   fmaps['labels'] = labels;
   fmaps['{}_features'.format(thisLayer)] = fm;
