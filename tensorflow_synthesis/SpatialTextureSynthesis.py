@@ -20,7 +20,6 @@ class SpatialTextureSynthesis:
         'sess' is tensorflow session
 
         '''
-        tf.disable_eager_execution()
 
         # Get the model and layers.
         self.model = model # Model instance
@@ -56,9 +55,10 @@ class SpatialTextureSynthesis:
 
         # Guides
         if guides is None or guides == 'all':
-            self.guides = ones(original_image.shape)
+            self.guides = np.squeeze(np.ones(original_image.shape))
         else:
             self.guides = guides
+        print('Shape of guides: {}'.format(self.guides.shape))
         self.fm_guides = self.get_fm_guides(layers=self.style_loss_layer_weights, mode='inside')
         for layer in self.style_loss_layer_weights: #normalise fm guides
             self.fm_guides[layer] = self.fm_guides[layer]/np.sqrt(np.diag(self.gram_matrix(self.fm_guides[layer])))
@@ -103,7 +103,7 @@ class SpatialTextureSynthesis:
 
             if mode=='all':
                 probe_image = np.zeros((batch_size,) + guide.shape + (3,))
-                probe_image[:,:, guide.astype(bool)] += 1e2 * np.random.randn(*probe_image[:,:,guide.astype(bool)].shape)
+                probe_image[:,guide.astype(bool),:] += 1e2 * np.random.randn(*probe_image[:,guide.astype(bool),:].shape)
                 feature_maps = self._get_activations(image=probe_image, layers=layers)
                 for layer in layers:
                     if m==0:
@@ -143,22 +143,18 @@ class SpatialTextureSynthesis:
             layer_gram_matrix = self.gram_matrix_guided_tf(layer_activations, self.fm_guides[layer])
             desired_gram_matrix = self.constraints[layer]
 
-            total_loss += self.style_loss_layer_weights[layer] * (1.0 / (4 * (num_filters**2) * (num_spatial_locations**2))) \
-                          * tf.reduce_sum(tf.pow(desired_gram_matrix - layer_gram_matrix, 2))
+            total_loss += self.style_loss_layer_weights[layer] * tf.reduce_mean(tf.pow(desired_gram_matrix - layer_gram_matrix, 2))
         return total_loss
 
-    def _get_constraints(self):
+    def _get_constraints(self, image=None):
+        if image is None:
+            image = self.original_image
         self.sess.run(tf.initialize_all_variables())
         constraints = dict()
         for layer in self.style_loss_layer_weights:
-            self.sess.run(self.model_layers['input'].assign(self.original_image))
+            self.sess.run(self.model_layers['input'].assign(image))
             layer_activations = self.sess.run(self.model_layers[layer])
-            #num_filters = layer_activations.shape[3] # N
-            #num_spatial_locations = layer_activations.shape[1] * layer_activations.shape[2] # M
-            #print(layer_activations.shape)
-            #constraints[layer] = self._compute_weighted_gram_matrix_np(layer, layer_activations, num_filters, num_spatial_locations)
             constraints[layer] = self.gram_matrix_guided(layer_activations, self.fm_guides[layer])
-            #print(constraints[layer].shape)
         return constraints
 
     def _get_activations(self, image=None, layers=None):
@@ -187,17 +183,18 @@ class SpatialTextureSynthesis:
         activations are of dimensions (n_fm,h,w), the n_fm feature maps of a CNN layer
         Output are n_ch gram matrices, that were computed with the feature maps weighted by the guidance channel
         '''
-        print('GRAM_MATRIX_GUIDED', activations.shape, guides.shape)
-        n_pos = activations.shape[0]*activations.shape[1]
+        print('(gram_matrix_guided_tf) Activations Shape: {}, Guides Shape: {}'.format(activations.shape, guides.shape))
+        n_pos = activations.shape[1]*activations.shape[2]
         n_fm = activations.shape[-1]    # number of feature maps
         n_ch = guides.shape[0]          # number of guidance channels
         G = tf.zeros((n_fm,n_fm,1))
         for c in range(n_ch):
             F = tf.multiply(tf.squeeze(activations), tf.cast(tf.expand_dims(guides[c,:,:],-1), tf.float32))
-            F = tf.cast(tf.reshape(F, (n_fm,-1)), tf.float32)
+            F = tf.reshape(tf.transpose(F, perm=[2,0,1]), (n_fm,n_pos))
 
             F2 = tf.expand_dims(tf.matmul(F, tf.transpose(F)) / tf.cast(n_pos, tf.float32),-1)
             G = tf.concat(values=[G, F2], axis=2)
+        print(G.shape)
         return G[:,:,1:]
 
     def gram_matrix_guided(self, activations, guides):
@@ -207,13 +204,15 @@ class SpatialTextureSynthesis:
         activations are of dimensions (n_fm,h,w), the n_fm feature maps of a CNN layer
         Output are n_ch gram matrices, that were computed with the feature maps weighted by the guidance channel
         '''
-        print('GRAM_MATRIX_GUIDED', activations.shape, guides.shape)
+        print('gram_matrix_guided_np: Activations Shape = {}; Guides Shape = {}'.format(activations.shape, guides.shape))
+        n_pos = activations.shape[1]*activations.shape[2]
         n_fm = activations.shape[-1]    # number of feature maps
         n_ch = guides.shape[0]          # number of guidance channels
         G = np.zeros((n_fm,n_fm,n_ch))
         for c in range(n_ch):
-            F = (np.squeeze(activations) * np.expand_dims(guides[c,:,:],-1)).reshape(n_fm,-1)
-            G[:,:,c] = F.dot(F.T) / F[0,:].size
+            # First do an element-wise multiplication on 
+            F = np.moveaxis(np.squeeze(activations) * np.expand_dims(guides[c,:,:],-1), -1, 0).reshape(n_fm,-1)
+            G[:,:,c] = F.dot(F.T) / n_pos
         return G
 
 
@@ -337,7 +336,7 @@ class SpatialTextureSynthesis:
             if i % SAVE_STEP == 0:
                 print("Saving image...")
                 curr_img = self.sess.run(self.model_layers["input"])
-                filename = "{}/{}x{}_{}_{}_smp{}_step_{}".format(self.saveDir, self.saveName, sampleIdx, i)
+                filename = "{}/{}_smp{}_step_{}".format(self.saveDir, self.saveName, sampleIdx, i)
                 save_image(filename, curr_img)
             sys.stdout.flush()
     

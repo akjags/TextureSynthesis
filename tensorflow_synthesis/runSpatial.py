@@ -28,7 +28,8 @@ def main(args):
     if args.layer not in style_layers:
         print('Error! Your requested style layer must be one of {}'.format(style_layers))
         return
-    this_layer_weight = {style_layers[i]: 1e9 for i in range(style_layers.index(args.layer))}
+    this_layer_weight = {style_layers[i]: 1e9 for i in range(style_layers.index(args.layer)+1)}
+    print(this_layer_weight)
 
     # Load up original image
     image_path = '{}/{}.jpg'.format(args.inputdir, args.image)
@@ -36,9 +37,8 @@ def main(args):
     #print(original_image.shape)
 
     # Load up guides
-    guide_dir = '/Users/akshay/proj/TextureSynthesis/tensorflow_synthesis/Receptive_Fields/MetaWindows_clean_s0.3'
+    guide_dir = '/home/users/akshayj/TextureSynthesis/tensorflow_synthesis/Receptive_Fields/MetaWindows_clean_s{}'.format(args.poolsize)
     nGuides = len(os.listdir(guide_dir))
-    nGuides=10
     guides = np.zeros((original_image.shape[1], original_image.shape[2], nGuides))
     for i, imName in enumerate(os.listdir(guide_dir)[:nGuides]):
         guideI = resize(imread('{}/{}'.format(guide_dir, imName)), (original_image.shape[1], original_image.shape[2]))
@@ -48,12 +48,12 @@ def main(args):
     print('Synthesizing texture {} matching up through layer {} for {} iterations'.format(args.image, args.layer, args.iterations))
     
     # Make a temporary directory to store outputs
-    tmpDir = "%s/iters" % (args.outputdir)
-    os.system("mkdir -p %s" %(tmpDir))    
+    args.itersdir = "%s/iters" % (args.outputdir)
+    os.system("mkdir -p %s" %(args.itersdir))    
 
     # Initialize texture synthesis
-    args.saveName = 'test'
-    saveParams = {'saveDir': args.outputdir, 'saveName': args.saveName}
+    saveParams = {'saveDir': args.itersdir, 'saveName': args.savefile}
+    #guides=None
     text_synth = SpatialTextureSynthesis(vgg19, original_image, guides, this_layer_weight, saveParams, iterations=args.iterations+1)
 
     # Do training
@@ -63,7 +63,7 @@ def main(args):
             text_synth.train(i+1)
     else:
         text_synth.train(args.sampleidx) 
-    postprocess_img(tmpDir, args)
+    postprocess_img(args.itersdir, args)
 
     print('DONE. This took {} seconds'.format(time.time()-start_time))
     sys.stdout.flush()
@@ -92,7 +92,7 @@ def preprocess_im(path):
 
 def postprocess_img(raw, args):
     for im in os.listdir(raw):
-        if 'step_{}.npy'.format(args.iterations) in im and '{}x{}_{}_{}'.format(args.nPools, args.nPools, args.layer, args.image) in im:
+        if 'step_{}.npy'.format(args.iterations) in im and '{}'.format(args.savefile) in im:
             imName = raw+'/'+im
             imi = np.load(imName)
             outName = '{}/{}'.format(args.outputdir, im[:im.index('_step')])
@@ -107,13 +107,14 @@ def postprocess_img(raw, args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-l", "--layer", default="pool2")
-    parser.add_argument("-d", "--inputdir", default="/Users/akshay/proj/TextureSynthesis/stimuli/textures/orig_all")
-    parser.add_argument("-o", "--outputdir", default="/Users/akshay/proj/TextureSynthesis/stimuli/textures/test")
+    parser.add_argument("-d", "--inputdir", default="/scratch/groups/jlg/texture_stimuli/color/originals")
+    parser.add_argument("-o", "--outputdir", default="/scratch/groups/jlg/texture_stimuli/color/metamers")
+    parser.add_argument('-f', '--savefile', default='rocks')
     parser.add_argument("-i", "--image", default="rocks")
     parser.add_argument("-s", "--sampleidx", type=int, default=1)
-    parser.add_argument("-p", "--nPools", type=int, default=1)
     parser.add_argument('-g', '--generateMultiple',type=int, default=0)
     parser.add_argument('-n', '--iterations', type=int, default=10000)
+    parser.add_argument('-p', '--poolsize', type=float, default=0.3)
     args = parser.parse_args()
     main(args)
     #tmpDir = "%s/iters" % (args.outputdir)
