@@ -1,20 +1,21 @@
 import numpy as np
 import tensorflow as tf
-import sys
+import sys, os
+import time
 
-from ImageUtils import *
-from model import *
+#from ImageUtils import *
+from VGG19 import *
 
 SAVE_STEP = 1000
 
 class TextureSynthesis:
-    def __init__(self, sess, model, actual_image, layer_constraints, model_name, image_name, saveDir, iterations, nSplits):
-        # 'layer_constraints' is dictionary with key = VGG layer and value = weight (w_l)
+    def __init__(self, model, original_image, layer_weights, nSplits, layer_name='', image_name='', saveDir='.', iterations=5000):
+        # 'layer_weights' is dictionary with key = VGG layer and value = weight (w_l)
         # 'sess' is tensorflow session
-        self.model_name = model_name # Of the form: conv#
+        self.layer_name = layer_name # Of the form: conv#
         self.image_name = image_name # Of the form: imageName
 
-        self.sess = sess
+        self.sess = tf.Session()
         self.sess.run(tf.initialize_all_variables())
 
         self.model = model # Model instance
@@ -22,11 +23,10 @@ class TextureSynthesis:
         self.model_layers = self.model.get_model()
 
         # Layer weights for the loss function
-        self.layer_weights = layer_constraints
-
-        self.actual_image = actual_image # 256x256x3
-
-        self.init_image = self._gen_noise_image()
+        self.layer_weights = layer_weights
+        self.original_image = original_image # 256x256x3
+        self.pooling_weights_path = '/home/users/akshayj/TextureSynthesis/tensorflow_synthesis/subset_weights'
+        self.RF_option = 'tile'
 
         # Number of splits
         self.nSpl = nSplits
@@ -38,18 +38,36 @@ class TextureSynthesis:
         self.iterations = iterations
 
         # Image size and network output size
-        self.imsize = self.actual_image.shape[1]
-        self.net_size = self.get_net_size()
+        self.imsize = self.original_image.shape[1]
+        start_time = time.time()
+        self.net_size = get_net_size()
+        elapsed_time = time.time() - start_time
+        print('Getting net size took {} seconds'.format(elapsed_time))
+
 
         # Get subset boundaries
-        self.subset_boundaries = self.get_subset_boundaries()
+        start_time = time.time()
+        self.subset_boundaries = self.get_subset_boundaries(option=self.RF_option)
+        elapsed_time = time.time() - start_time
+        print('Getting subset boundaries took {} seconds'.format(elapsed_time))
 
         # precompute layer subset weights
-        print 'Precomputing layer subset weights'
-        self.layer_subset_weights = self.precompute_layer_subset_weights()
+        start_time = time.time()
+        layer_subset_weights_path = '{}/{}x{}_{}.npy'.format(self.pooling_weights_path, self.nSpl, self.nSpl, self.RF_option)
+        if os.path.isfile(layer_subset_weights_path):
+            self.layer_subset_weights = np.load(layer_subset_weights_path).item()
+            print(layer_subset_weights_path, self.layer_subset_weights.keys())
+        else:
+            print('Pre-saved weights not found, so computing layer subset weights and saving to {}'.format(layer_subset_weights_path))
+            self.layer_subset_weights = self.precompute_layer_subset_weights(layer_subset_weights_path)
+        elapsed_time = time.time() - start_time
+        print('Precomputing layer subset weights took {} seconds'.format(elapsed_time))
 
-        # Get constraints
-        self.constraints = self._get_constraints() # {layer_name: activations}
+        # Get gramian
+        start_time = time.time()
+        self.gramian = self._get_gramian() # {layer_name: activations}
+        elapsed_time = time.time() - start_time
+        print('Getting gramian took {} seconds'.format(elapsed_time))
 
 
     def get_texture_loss(self):
@@ -63,24 +81,69 @@ class TextureSynthesis:
             num_filters = layer_activations_shape[3] # N
             num_spatial_locations = layer_activations_shape[1] * layer_activations_shape[2] # M
             layer_gram_matrix = self._compute_weighted_gram_matrix(layer, layer_activations, num_filters, num_spatial_locations)
-            desired_gram_matrix = self.constraints[layer]
+            desired_gram_matrix = self.gramian[layer]
 
             total_loss += self.layer_weights[layer] * (1.0 / (4 * (num_filters**2) * (num_spatial_locations**2))) \
                           * tf.reduce_sum(tf.pow(desired_gram_matrix - layer_gram_matrix, 2))
         return total_loss
 
-    def _get_constraints(self):
+    def get_spectral_loss(self):
+      total_loss = 0.0
+      target = tf.spectral.fft2d(tf.cast(tf.transpose(self.original_image, [0,3,1,2]), dtype=tf.complex64))
+      current = tf.spectral.fft2d(tf.cast(tf.transpose(self.model_layers['input'], [0,3,1,2]), dtype=tf.complex64))
+      print(target.shape, current.shape)
+
+      magnitude = 20 * log10(tf.maximum(tf.abs(tf.spectral.rfft2d(tf.cast(tf.transpose(self.original_image,[0,3,1,2]), dtype=tf.float32))), 1E-06))
+      currmag =  20 * log10(tf.maximum(tf.abs(tf.spectral.rfft2d(tf.cast(tf.transpose(self.model_layers['input'],[0,3,1,2]), dtype=tf.float32))), 1E-06))
+
+      #print(magnitude.shape)
+     
+      loss = tf.reduce_sum(tf.pow(tf.abs(target)-tf.abs(current), 2));
+      return tf.to_float(loss)
+      
+    def get_luminancehistogram_loss(self):
+      mean_loss = 0.0
+      var_loss = 0.0
+      skew_loss = 0.0
+      kurt_loss = 0.0
+      for i in range(self.original_image.shape[3]): # loop through channels
+        current_imageI = self.model_layers['input'][:,:,:,i]
+        target_imageI = tf.convert_to_tensor(self.original_image[:,:,:,i], dtype=current_imageI.dtype)
+
+        target_mean, target_var = tf.nn.moments(target_imageI, axes=[0,1,2])
+        current_mean, current_var = tf.nn.moments(current_imageI, axes=[0,1,2])
+        
+
+        mean_loss += tf.reduce_sum(tf.pow(target_mean - current_mean, 2))
+        var_loss += tf.reduce_sum(tf.pow(target_var - current_var, 2))
+
+      total_loss = 1.0*mean_loss + 1.0*var_loss #+ 1.0*skew_loss + 1.0*kurt_loss
+      return total_loss
+    
+    def _get_gramian(self, original_image=None):
+        if original_image is None:
+            original_image = self.original_image
         self.sess.run(tf.initialize_all_variables())
-        constraints = dict()
+        gramian = dict()
         for layer in self.layer_weights:
-            self.sess.run(self.model_layers['input'].assign(self.actual_image))
+            self.sess.run(self.model_layers['input'].assign(original_image))
             layer_activations = self.sess.run(self.model_layers[layer])
             num_filters = layer_activations.shape[3] # N
             num_spatial_locations = layer_activations.shape[1] * layer_activations.shape[2] # M
-            print layer_activations.shape
-            constraints[layer] = self._compute_weighted_gram_matrix_np(layer, layer_activations, num_filters, num_spatial_locations)
+            #print layer_activations.shape
+            gramian[layer] = self._compute_weighted_gram_matrix_np(layer, layer_activations, num_filters, num_spatial_locations)
+        return gramian
 
-        return constraints
+    def _get_activations(self, original_image=None):
+        if original_image is None:
+            original_image = self.original_image
+        self.sess.run(tf.initialize_all_variables())
+        activations = dict()
+        for layer in self.layer_weights:
+            #self.sess.run(self.model_layers['input'].assign(original_image))
+            self.model_layers['input'].load(original_image, self.sess)
+            activations[layer] = self.sess.run(self.model_layers[layer])
+        return activations
 
     def _compute_gram_matrix_np(self, F, N, M):
         F = F.reshape(M, N)
@@ -93,7 +156,7 @@ class TextureSynthesis:
         F = tf.reshape(F, (M, N)) # Vectorize each filter so F is now of shape: (height*width, num_filters)
         return tf.matmul(tf.transpose(F), F)  
 
-    def get_subset_boundaries(self):
+    def get_subset_boundaries(self, option='tile'):
         '''
         Using self.nSpl (number of splits), computes the subset boundaries
         - returns a list of lists each containing the boundaries of the i'th subset 
@@ -142,14 +205,14 @@ class TextureSynthesis:
             subset_weights = np.reshape(weight_mtx[:,:,si], (M,1))
             weighted_F = np.multiply(F, subset_weights)
 
-            print weighted_F.shape
+            #print weighted_F.shape
 
             dp = np.matmul(weighted_F.T, weighted_F).reshape((N,N,1))
             F2 = np.concatenate((F2,dp), axis=2)
 
         return F2[:,:,1:]
 
-    def precompute_layer_subset_weights(self, imsize=256):
+    def precompute_layer_subset_weights(self, savepath, imsize=256):
         '''
           Precompute layer subset weights
               Returns a dictionary with keys = layer names, and values = matrix of 
@@ -161,6 +224,9 @@ class TextureSynthesis:
         lsub_weights = {}
         for layI in range(len(layer_names)):
             lname = layer_names[layI]
+            #if lname not in self.layer_weights.keys():
+            #    print('Skipping layer {}'.format(lname))
+            #    continue
             out_size = int(self.net_size['out_size'][layI])
             
             nSubsets = len(self.subset_boundaries)
@@ -174,73 +240,57 @@ class TextureSynthesis:
                         rf_size, center, [tl,br] = self.get_rf_coords(lname, pos)
                         layer_weight[xi,yi,si] = calc_proportion_overlap([tl,br], isub, self.imsize)
             lsub_weights[lname] = layer_weight
+        np.save(savepath, lsub_weights)
         return lsub_weights
 
     def _gen_noise_image(self):
         input_size = self.model_layers["input"].get_shape().as_list()
         return np.random.randn(input_size[0], input_size[1], input_size[2], input_size[3])
 
-    def train(self):
+    def train(self, sampleIdx=1, loss='both', loss_criteria=1e5, spectral_weight=1e-4):
         self.sess.run(tf.initialize_all_variables())
-        self.sess.run(self.model_layers["input"].assign(self.actual_image))
+        self.sess.run(self.model_layers["input"].assign(self.original_image))
 
         content_loss = self.get_texture_loss()
+        spectral_loss = self.get_spectral_loss()
+        luminancehistogram_loss = self.get_luminancehistogram_loss()
         optimizer = tf.train.AdamOptimizer(2.0)
-        train_step = optimizer.minimize(content_loss)
+        #train_step = optimizer.minimize(content_loss)
+        if loss == 'texture':
+          print('Using texture loss')
+          train_step = optimizer.minimize(content_loss)
+        elif loss == 'spectral':
+          print('Using both spectral and texture loss')
+          train_step = optimizer.minimize(spectral_weight*spectral_loss + content_loss)
+        elif loss == 'luminancehistogram':
+          print('Using both texture and luminance histogram (mean/var) loss')
+          train_step = optimizer.minimize(content_loss + luminancehistogram_loss)
+        else:
+          print('Using all 3 of : spectral, luminance mean/var, and texture loss')
+          #print(spectral_loss.dtype, content_loss.dtype)
+          train_step = optimizer.minimize(spectral_weight*spectral_loss + luminancehistogram_loss + content_loss)
+
+        self.init_image = self._gen_noise_image()
 
         self.sess.run(tf.initialize_all_variables())
         self.sess.run(self.model_layers["input"].assign(self.init_image))
+        #i = 0
+        #while self.sess.run(content_loss) > loss_criteria:
         for i in range(self.iterations):
             self.sess.run(train_step)
-            if i % 1 == 0:
-                print "Iteration: " + str(i) + "; Loss: " + str(self.sess.run(content_loss))
+            if i % 100 == 0:
+              print('Iteration: {}; Content Loss: {}; Spectral Loss: {}; Luminance Histogram Loss: {}'.format(i, self.sess.run(content_loss), self.sess.run(spectral_loss), self.sess.run(luminancehistogram_loss)))
             if i % SAVE_STEP == 0:
                 print "Saving image..."
                 curr_img = self.sess.run(self.model_layers["input"])
-                filename = self.saveDir + "/%gx%g_%s_%s_step_%d" % (self.nSpl, self.nSpl, self.model_name, self.image_name, i)
+                filename = self.saveDir + "/{}x{}_{}_{}_smp{}_step_{}".format(self.nSpl, self.nSpl, self.layer_name, self.image_name, sampleIdx, i)
                 save_image(filename, curr_img)
             sys.stdout.flush()
-    
-    def get_net_size(self):
-        # Net = vgg architecture [filter size, stride, padding]
-        net = [[3,1,1],[3,1,1], [2,2,0], [3,1,1], [3,1,1], [2,2,0], [3,1,1], [3,1,1],[2,2,0],\
-               [3,1,1], [3,1,1], [3,1,1], [3,1,1],[2,2,0], [3,1,1], [3,1,1], [3,1,1], [3,1,1], [2,2,0]]
+            #i = i+1
+        #filename = '{}/{}_{}_{}_{}_smp{}_step_final_{}'.format(self.saveDir, self.nSpl, self.nSpl, self.layer_name, self.image_name, sampleIdx, i)
+        #save_image(filename, self.sess.run(self.model_layers['input']))
+        return i
 
-        out_size = np.zeros(len(net))
-        rf_size = np.zeros(len(net))
-        tot_stride = np.zeros(len(net))
-        start1 = np.zeros(len(net), dtype=np.float64)
-        
-        insize = self.imsize
-        totstride = 1
-        startPos = 0.5
-        rf_sz = net[0][0]
-        for layer in range(len(net)):
-            filt_sz, stride, pad = net[layer]
-            
-            # Calculate outsize as a function of insize
-            out_sz = np.floor((insize - filt_sz + 2*pad) / stride) + 1
-
-            actualP = (out_sz-1)*stride - insize + filt_sz
-            pL = np.floor(actualP/2)
-
-            # Calculate RF size as a function of previous layer RF size
-            if layer > 0:
-                rf_sz = rf_sz + (filt_sz-1)*totstride
-                
-            # Start position
-            startPos = startPos + ((filt_sz-1)/2.0 - pL)*totstride
-            
-            # Distance between the center of adjacent features 
-            totstride = totstride * stride
-            
-            out_size[layer], rf_size[layer], tot_stride[layer] = out_sz, rf_sz, totstride
-            start1[layer] = startPos
-            
-            insize = out_sz
-            
-        net_size = {'out_size': out_size, 'rf_size': rf_size, 'tot_stride': tot_stride, 'center00': start1}
-        return net_size
     
     def get_rf_coords(self, layerName, pos, imsize=256):
         layer_names = ['conv1_1', 'conv1_2','pool1','conv2_1', 'conv2_2', 'pool2', 'conv3_1', \
@@ -258,6 +308,47 @@ class TextureSynthesis:
         bottom_right = [center[0] + rf_size/2.0, center[1] + rf_size/2.0]
 
         return rf_size, center, [top_left, bottom_right]
+
+def get_net_size(imsize=256):
+    # Net = vgg architecture [filter size, stride, padding]
+    net = [[3,1,1],[3,1,1], [2,2,0], [3,1,1], [3,1,1], [2,2,0], [3,1,1], [3,1,1],[2,2,0],\
+           [3,1,1], [3,1,1], [3,1,1], [3,1,1],[2,2,0], [3,1,1], [3,1,1], [3,1,1], [3,1,1], [2,2,0]]
+
+    out_size = np.zeros(len(net))
+    rf_size = np.zeros(len(net))
+    tot_stride = np.zeros(len(net))
+    start1 = np.zeros(len(net), dtype=np.float64)
+    
+    insize = imsize
+    totstride = 1
+    startPos = 0.5
+    rf_sz = net[0][0]
+    for layer in range(len(net)):
+        filt_sz, stride, pad = net[layer]
+        
+        # Calculate outsize as a function of insize
+        out_sz = np.floor((insize - filt_sz + 2*pad) / stride) + 1
+
+        actualP = (out_sz-1)*stride - insize + filt_sz
+        pL = np.floor(actualP/2)
+
+        # Calculate RF size as a function of previous layer RF size
+        if layer > 0:
+            rf_sz = rf_sz + (filt_sz-1)*totstride
+            
+        # Start position
+        startPos = startPos + ((filt_sz-1)/2.0 - pL)*totstride
+        
+        # Distance between the center of adjacent features 
+        totstride = totstride * stride
+        
+        out_size[layer], rf_size[layer], tot_stride[layer] = out_sz, rf_sz, totstride
+        start1[layer] = startPos
+        
+        insize = out_sz
+        
+    net_size = {'out_size': out_size, 'rf_size': rf_size, 'tot_stride': tot_stride, 'center00': start1}
+    return net_size
 
 def calc_proportion_overlap(rf, subset, imsize): 
     '''
@@ -325,25 +416,23 @@ def shape(tensor):
     s = tensor.get_shape()
     return tuple([s[i].value for i in range(0, len(s))])
 
+def save_image(path, image):
+    # Output should add back the mean.
+    MEAN_VALUES = np.array([123.68, 116.779, 103.939]).reshape((1,1,1,3))
+    image = image + MEAN_VALUES
+    # Get rid of the first useless dimension, what remains is the image.
+    image = image[0]
+    image = np.clip(image, 0, 255).astype('uint8')
+    np.save(path, image)
+    
+def log10(x):
+    numerator = tf.log(x)
+    denominator = tf.log(tf.constant(10, dtype=numerator.dtype))
+    return numerator / denominator
+
 #===============================
 if __name__ == "__main__":
     args = sys.argv
-    texture = "%s.npy" %(args[1]) # pass texture in as an argument
-    sess = tf.Session()
-    pool1_weights = {'conv1_1': 1e9, 'pool1': 1e9, 'pool2': 1e9, 'pool3': 1e9, 'pool4': 1e9}
-    vgg_weights = VGGWeights('vgg19_normalized.pkl')
-    my_model = Model(vgg_weights)
-    my_model.build_model()
-    #texture = "tulips.npy"
-    image_name = texture.split(".")[0]
-    textures_directory = "orig_ims"
-    filename = textures_directory + "/" + texture
-    img = np.load(filename)
-    model_name = 'pool4'
-    saveDir = 'w3'
-    iterations = 10001
-    nSplits = 4
-    ts = TextureSynthesis(sess, my_model, img, pool1_weights, model_name, image_name, saveDir, iterations, nSplits)
-    np.save('/home/users/akshayj/TextureSynthesis/tmp/gram_%s.npy' %(image_name), ts.constraints)
-    #ts.train()
+
+    ts = TextureSynthesis(vgg19, original_image, layer_weights, nPools)
 
