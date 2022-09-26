@@ -1,5 +1,9 @@
 import numpy as np
-import tensorflow as tf
+import numpy.matlib
+# import tensorflow as tf
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
+from skimage.io import imread, imsave
 import sys, os
 import time
 
@@ -25,7 +29,7 @@ class TextureSynthesis:
         # Layer weights for the loss function
         self.layer_weights = layer_weights
         self.original_image = original_image # 256x256x3
-        self.pooling_weights_path = '/home/users/akshayj/TextureSynthesis/tensorflow_synthesis/subset_weights'
+        self.pooling_weights_path = '/home/gru/akshay/TextureSynthesis/tensorflow_synthesis/subset_weights'
         self.RF_option = 'tile'
 
         # Number of splits
@@ -55,7 +59,7 @@ class TextureSynthesis:
         start_time = time.time()
         layer_subset_weights_path = '{}/{}x{}_{}.npy'.format(self.pooling_weights_path, self.nSpl, self.nSpl, self.RF_option)
         if os.path.isfile(layer_subset_weights_path):
-            self.layer_subset_weights = np.load(layer_subset_weights_path).item()
+            self.layer_subset_weights = np.load(layer_subset_weights_path, allow_pickle=True, encoding='latin1').item()
             print(layer_subset_weights_path, self.layer_subset_weights.keys())
         else:
             print('Pre-saved weights not found, so computing layer subset weights and saving to {}'.format(layer_subset_weights_path))
@@ -73,7 +77,7 @@ class TextureSynthesis:
     def get_texture_loss(self):
         total_loss = 0.0
         for layer in self.layer_weights.keys():
-            print layer
+            print(layer)
             layer_activations = self.model_layers[layer]
             layer_activations_shape = layer_activations.get_shape().as_list()
             assert len(layer_activations_shape) == 4 # (1, H, W, outputs)
@@ -279,11 +283,11 @@ class TextureSynthesis:
         for i in range(self.iterations):
             self.sess.run(train_step)
             if i % 100 == 0:
-              print('Iteration: {}; Content Loss: {}; Spectral Loss: {}; Luminance Histogram Loss: {}'.format(i, self.sess.run(content_loss), self.sess.run(spectral_loss), self.sess.run(luminancehistogram_loss)))
+              print('Iteration: {}; Texture Loss: {:.3f}; Spectral Loss: {:.3f}; Luminance Histogram Loss: {:.3f}'.format(i, self.sess.run(content_loss), self.sess.run(spectral_loss), self.sess.run(luminancehistogram_loss)))
             if i % SAVE_STEP == 0:
-                print "Saving image..."
+                print("Saving image...")
                 curr_img = self.sess.run(self.model_layers["input"])
-                filename = self.saveDir + "/{}x{}_{}_{}_smp{}_step_{}".format(self.nSpl, self.nSpl, self.layer_name, self.image_name, sampleIdx, i)
+                filename = self.saveDir + "/{}_{}x{}_{}_smp{}_step_{}".format( self.image_name, self.nSpl, self.nSpl, self.layer_name, sampleIdx, i)
                 save_image(filename, curr_img)
             sys.stdout.flush()
             #i = i+1
@@ -424,6 +428,7 @@ def save_image(path, image):
     image = image[0]
     image = np.clip(image, 0, 255).astype('uint8')
     np.save(path, image)
+    #imsave('{}.png'.format('.'.join(path.split('.')[:-1])), image)
     
 def log10(x):
     numerator = tf.log(x)

@@ -1,4 +1,7 @@
-import tensorflow as tf
+#import tensorflow as tf
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
+
 import numpy as np
 
 HEIGHT = 256
@@ -11,7 +14,7 @@ class Utils:
     """
 
     def conv2d_relu(self, layer, filters, bias, strides, padding):
-        return tf.nn.relu(tf.nn.conv2d(layer, filter=filters, strides=strides, padding=padding) + bias)
+        return tf.nn.relu(tf.nn.conv2d(layer, filters=filters, strides=strides, padding=padding) + bias)
 
     def avg_pool(self, layer, kernel_size, stride, padding):
         return tf.nn.avg_pool(layer, ksize=kernel_size, strides=stride, padding=padding)

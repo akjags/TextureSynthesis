@@ -1,5 +1,8 @@
 import numpy as np
-import tensorflow as tf
+# import tensorflow as tf
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
+
 import os
 import sys, time
 import argparse
@@ -8,6 +11,8 @@ import TextureSynthesis as ts
 #from VGGWeights import *
 from VGG19 import *
 from skimage.io import imread, imsave
+from skimage.transform import resize
+
 import pickle
 
 def main(args):
@@ -19,7 +24,7 @@ def main(args):
     
     # Load VGG-19 weights and build model.
     with open(weights_file, 'rb') as f:
-        vgg_weights = pickle.load(f)['param values']
+        vgg_weights = pickle.load(f, encoding='latin1')['param values']
     vgg19 = VGG19(vgg_weights)
     vgg19.build_model()
 
@@ -29,14 +34,15 @@ def main(args):
     layer_weight = {x: 1e9 for x in all_layers[:all_layers.index(args.layer)+1]}
 
     # Load up original image
-    image_path = '{}/{}.jpg'.format(args.inputdir, args.image)
+    image_path = args.imagepath #'{}/{}.jpg'.format(args.inputdir, args.image)
+    args.image = image_path.split('/')[-1].split('.')[0]
     original_image = preprocess_im(image_path)
 
     # Make a temporary directory to save the intermediates in.
     tmpDir = "%s/iters" % (args.outputdir)
     os.system("mkdir -p %s" %(tmpDir))
 
-    print "Synthesizing texture", args.image, "matching model", args.layer, "for", args.iterations, "iterations, with nPools:", args.nPools
+    print("Synthesizing texture", args.image, "matching model", args.layer, "for", args.iterations, "iterations, with nPools:", args.nPools)
 
     # Initialize texture synthesis
     texsyn = ts.TextureSynthesis(vgg19, original_image, layer_weight, args.nPools, args.layer, args.image, tmpDir, args.iterations+1)
@@ -60,7 +66,7 @@ def preprocess_im(path):
     image = imread(path)
 
     if image.shape[1]!=256 or image.shape[0]!=256:
-        image = resize(image, (256,256))
+        image = resize(image, (256,256), preserve_range=True, anti_aliasing=True).astype('uint8')
 
     # Resize the image for convnet input, there is no change but just
     # add an extra dimension.
@@ -78,7 +84,7 @@ def preprocess_im(path):
 
 def postprocess_img(raw, args, steps=None):
     for im in os.listdir(raw):
-        if '{}_{}_{}_smp'.format(args.nPools, args.layer, args.image) in im  and ('final' in im or 'step_{}.npy'.format(args.iterations) in im or 'step_{}.npy'.format(steps) in im): 
+        if '{}_{}x{}_{}_smp'.format(args.image, args.nPools, args.nPools, args.layer) in im  and ('final' in im or 'step_{}.npy'.format(args.iterations) in im or 'step_{}.npy'.format(steps) in im): 
             path_to_img = raw+'/'+im
             filename = im[:im.index('_step_')]
             if steps is not None and steps!=args.iterations:
@@ -86,6 +92,8 @@ def postprocess_img(raw, args, steps=None):
             if 'final' in im:
               filename += '_final'
             save_path = '{}/{}'.format(args.outputdir, filename)
+            if not os.path.isdir('{}/npy'.format(args.outputdir)):
+              os.mkdir('{}/npy'.format(args.outputdir))
 
             if filename + '.png' not in os.listdir(args.outputdir):
               image = np.load(path_to_img)
@@ -94,8 +102,8 @@ def postprocess_img(raw, args, steps=None):
               imsave(save_path + '.png', image)
 
               # Also copy .npy fileinto outdir
-              os.system('cp %s %s.npy' % (path_to_img, save_path))
-              print im + ' saved as PNG to ' + args.outputdir
+              os.system('cp {} {}/npy/{}.npy'.format(path_to_img, args.outputdir, filename))
+              print(im + ' saved as PNG to ' + args.outputdir)
 
 
 def test_model(args):
@@ -104,7 +112,7 @@ def test_model(args):
     
     # Load VGG-19 weights and build model.
     with open(weights_file, 'rb') as f:
-        vgg_weights = pickle.load(f)['param values']
+        vgg_weights = pickle.load(f, encoding='latin1')['param values']
     vgg19 = VGG19(vgg_weights)
     vgg19.build_model()
 
@@ -114,14 +122,14 @@ def test_model(args):
     layer_weight = {x: 1e9 for x in all_layers[:all_layers.index(args.layer)+1]}
 
     # Load up original image
-    image_path = '{}/{}.jpg'.format(args.inputdir, args.image)
+    image_path = args.imagepath 
     original_image = preprocess_im(image_path)
 
     # Make a temporary directory to save the intermediates in.
     tmpDir = "%s/iters" % (args.outputdir)
     os.system("mkdir -p %s" %(tmpDir))
 
-    print "Synthesizing texture", args.image, "matching model", args.layer, "for", args.iterations, "iterations, with nPools:", args.nPools
+    print("Synthesizing texture", args.image, "matching model", args.layer, "for", args.iterations, "iterations, with nPools:", args.nPools)
 
     # Initialize texture synthesis
     texsyn = ts.TextureSynthesis(vgg19, original_image, layer_weight, args.nPools, args.layer, args.image, tmpDir, args.iterations+1)
@@ -131,16 +139,20 @@ def test_model(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-l", "--layer", default="pool4")
-    parser.add_argument("-d", "--inputdir", default="/scratch/groups/jlg/texture_stimuli/color/originals")
+    #parser.add_argument("-d", "--inputdir", default="/scratch/groups/jlg/texture_stimuli/color/originals")
     parser.add_argument("-o", "--outputdir", default="/scratch/groups/jlg/texture_stimuli/color/textures")
-    parser.add_argument("-i", "--image", default="rocks")
+    parser.add_argument("-i", "--imagepath", default="/home/gru/akshay/manyOO/humanfaces/humanfaces_01.jpg")
     parser.add_argument("-s", "--sampleidx", type=int, default=1)
     parser.add_argument("-p", "--nPools", type=int, default=1)
     parser.add_argument('-g', '--generateMultiple',type=int, default=0)
     parser.add_argument('-n', '--iterations', type=int, default=10000)
-    parser.add_argument('-k', '--loss', default='both') # both, spectral, or texture
+    parser.add_argument('-k', '--loss', default='texture') # "texture" (gramian only) or "spectral" (gramian + FFT)
     args = parser.parse_args()
-    texsyn = main(args)
+    
+    if not os.path.isfile(args.imagepath):
+        print(f'Error: image {args.imagepath} not found. Quitting...')
+    else:
+        texsyn = main(args)
 
     #texsyn = test_model(args)
     #raw = args.outputdir + '/iters'
