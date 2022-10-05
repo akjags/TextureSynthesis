@@ -4,13 +4,14 @@ import numpy.matlib
 import tensorflow.compat.v1 as tf
 tf.disable_v2_behavior()
 from skimage.io import imread, imsave
-import sys, os
+import sys, os, time
 import time
 
 #from ImageUtils import *
 from VGG19 import *
 
 SAVE_STEP = 1000
+PRINT_STEP = 200
 
 class TextureSynthesis:
     def __init__(self, model, original_image, layer_weights, nSplits, layer_name='', image_name='', saveDir='.', iterations=5000):
@@ -65,13 +66,13 @@ class TextureSynthesis:
             print('Pre-saved weights not found, so computing layer subset weights and saving to {}'.format(layer_subset_weights_path))
             self.layer_subset_weights = self.precompute_layer_subset_weights(layer_subset_weights_path)
         elapsed_time = time.time() - start_time
-        print('Precomputing layer subset weights took {} seconds'.format(elapsed_time))
+        print('Precomputing layer subset weights took {:.3f} seconds'.format(elapsed_time))
 
         # Get gramian
         start_time = time.time()
         self.gramian = self._get_gramian() # {layer_name: activations}
         elapsed_time = time.time() - start_time
-        print('Getting gramian took {} seconds'.format(elapsed_time))
+        print('Getting gramian took {:.3f} seconds'.format(elapsed_time))
 
 
     def get_texture_loss(self):
@@ -252,6 +253,8 @@ class TextureSynthesis:
         return np.random.randn(input_size[0], input_size[1], input_size[2], input_size[3])
 
     def train(self, sampleIdx=1, loss='both', loss_criteria=1e5, spectral_weight=1e-4):
+        start_time = time.time()
+
         self.sess.run(tf.initialize_all_variables())
         self.sess.run(self.model_layers["input"].assign(self.original_image))
 
@@ -282,8 +285,8 @@ class TextureSynthesis:
         #while self.sess.run(content_loss) > loss_criteria:
         for i in range(self.iterations):
             self.sess.run(train_step)
-            if i % 100 == 0:
-              print('Iteration: {}; Texture Loss: {:.3f}; Spectral Loss: {:.3f}; Luminance Histogram Loss: {:.3f}'.format(i, self.sess.run(content_loss), self.sess.run(spectral_loss), self.sess.run(luminancehistogram_loss)))
+            if i % PRINT_STEP == 0:
+              print('Iteration: {}; Texture Loss: {:.1f}; Spectral Loss: {:.3e}; Luminance Histogram Loss: {:.3e}'.format(i, self.sess.run(content_loss), self.sess.run(spectral_loss), self.sess.run(luminancehistogram_loss)))
             if i % SAVE_STEP == 0:
                 print("Saving image...")
                 curr_img = self.sess.run(self.model_layers["input"])
@@ -293,6 +296,8 @@ class TextureSynthesis:
             #i = i+1
         #filename = '{}/{}_{}_{}_{}_smp{}_step_final_{}'.format(self.saveDir, self.nSpl, self.nSpl, self.layer_name, self.image_name, sampleIdx, i)
         #save_image(filename, self.sess.run(self.model_layers['input']))
+        print('Done synthesizing one image - took {:.2f} seconds.'.format(time.time()-start_time))
+
         return i
 
     

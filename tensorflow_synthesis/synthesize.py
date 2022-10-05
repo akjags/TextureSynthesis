@@ -56,7 +56,7 @@ def main(args):
         texsyn.train(args.sampleidx, loss=args.loss) 
     postprocess_img(tmpDir, args)
 
-    print('DONE. This took {} seconds'.format(time.time()-start_time))
+    print('Done synthesizing all images. Took {:.2f} seconds in total.'.format(time.time()-start_time))
     sys.stdout.flush()
 
     return texsyn
@@ -145,7 +145,7 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--sampleidx", type=int, default=1)
     parser.add_argument("-p", "--nPools", type=int, default=1)
     parser.add_argument('-g', '--generateMultiple',type=int, default=0)
-    parser.add_argument('-n', '--iterations', type=int, default=10000)
+    parser.add_argument('-n', '--iterations', type=int, default=5000)
     parser.add_argument('-k', '--loss', default='texture') # "texture" (gramian only) or "spectral" (gramian + FFT)
     args = parser.parse_args()
     
